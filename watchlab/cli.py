@@ -10,6 +10,7 @@ import sys
 
 from . import catalogue, db, hedonic, ingest, metrics
 from .sources import chrono24, synthetic
+from .sources import thewatchapi as _thewatchapi
 
 
 def cmd_demo(args: argparse.Namespace) -> int:
@@ -92,6 +93,92 @@ def cmd_catalogue_import(args: argparse.Namespace) -> int:
     if len(report.errors) > 20:
         print(f"  ... and {len(report.errors) - 20} more errors", file=sys.stderr)
     return 1 if report.errors and report.refs_inserted == 0 and report.refs_updated == 0 else 0
+
+
+def _thewatchapi_token(args: argparse.Namespace) -> str | None:
+    token = args.token or os.environ.get("THEWATCHAPI_TOKEN")
+    if not token:
+        print(
+            "no API token: pass --token or set THEWATCHAPI_TOKEN. "
+            "Never commit a token to the repo.", file=sys.stderr,
+        )
+        return None
+    return token
+
+
+def _thewatchapi_client(args: argparse.Namespace) -> _thewatchapi.Client | None:
+    token = _thewatchapi_token(args)
+    if not token:
+        return None
+    cache_dir = args.cache_dir or os.path.join(os.path.dirname(args.db) or ".", ".thewatchapi_cache")
+    return _thewatchapi.Client(token=token, cache_dir=cache_dir)
+
+
+def cmd_thewatchapi_sync_brand(args: argparse.Namespace) -> int:
+    """Cheap path: reference/list for a brand -> refs table (brand + reference only)."""
+    client = _thewatchapi_client(args)
+    if client is None:
+        return 1
+    try:
+        records = _thewatchapi.sync_brand_references(client, args.brand)
+    except _thewatchapi.ThewatchapiError as exc:
+        print(f"thewatchapi error: {exc}", file=sys.stderr)
+        return 1
+    with db.session(args.db) as conn:
+        report = catalogue.upsert_catalogue(conn, records)
+    print(f"{args.brand}: {report.summary()}")
+    return 0
+
+
+def cmd_thewatchapi_enrich(args: argparse.Namespace) -> int:
+    """HIGH USAGE: one model/search call per --reference. Never loops a whole brand."""
+    client = _thewatchapi_client(args)
+    if client is None:
+        return 1
+    records = []
+    for reference in args.reference:
+        try:
+            record = _thewatchapi.enrich_reference(client, args.brand, reference)
+        except _thewatchapi.ThewatchapiError as exc:
+            print(f"  ! {args.brand} {reference}: {exc}", file=sys.stderr)
+            continue
+        if record is None:
+            print(f"  ! {args.brand} {reference}: no match", file=sys.stderr)
+            continue
+        records.append(_thewatchapi.to_catalogue_record(record))
+    if not records:
+        print("nothing enriched", file=sys.stderr)
+        return 1
+    with db.session(args.db) as conn:
+        report = catalogue.upsert_catalogue(conn, records)
+    print(report.summary())
+    return 0
+
+
+def cmd_thewatchapi_price_history(args: argparse.Namespace) -> int:
+    """Standard-plan-and-above endpoint. Stores to provider_price_series, not index_points."""
+    client = _thewatchapi_client(args)
+    if client is None:
+        return 1
+
+    scope_type, scope_value, fetch = next(
+        (kind, value, fn) for kind, value, fn in (
+            ("brand", args.brand, _thewatchapi.brand_price_history),
+            ("model", args.model, _thewatchapi.model_price_history),
+            ("reference", args.reference, _thewatchapi.reference_price_history),
+        ) if value
+    )
+    try:
+        payload = fetch(client, scope_value, date_from=args.date_from, date_to=args.date_to)
+    except _thewatchapi.ThewatchapiError as exc:
+        print(f"thewatchapi error: {exc}", file=sys.stderr)
+        return 1
+
+    with db.session(args.db) as conn:
+        n = ingest.store_provider_price_series(conn, "thewatchapi", scope_type, scope_value, payload)
+    print(f"{scope_type}={scope_value}: {n} price points stored "
+          "(indicative asking prices -- see provider_price_series docstring)")
+    return 0
 
 
 def cmd_index(args: argparse.Namespace) -> int:
@@ -198,6 +285,42 @@ def build_parser() -> argparse.ArgumentParser:
     )
     catalogue_import.add_argument("file")
     catalogue_import.set_defaults(func=cmd_catalogue_import)
+
+    def _token_arg(p):
+        p.add_argument("--token", help="thewatchapi token (default: $THEWATCHAPI_TOKEN)")
+        p.add_argument("--cache-dir", help="response cache dir (default: <db dir>/.thewatchapi_cache)")
+
+    twa = subparsers.add_parser(
+        "thewatchapi", help="pull reference/price data from thewatchapi.com"
+    )
+    twa_sub = twa.add_subparsers(dest="thewatchapi_command", required=True)
+
+    twa_sync = twa_sub.add_parser(
+        "sync-brand", help="cheap: reference/list -> refs table (brand + reference only)"
+    )
+    twa_sync.add_argument("brand")
+    _token_arg(twa_sync)
+    twa_sync.set_defaults(func=cmd_thewatchapi_sync_brand)
+
+    twa_enrich = twa_sub.add_parser(
+        "enrich", help="HIGH USAGE: model/search per reference for case/movement/years"
+    )
+    twa_enrich.add_argument("--brand", required=True)
+    twa_enrich.add_argument("--reference", nargs="+", required=True)
+    _token_arg(twa_enrich)
+    twa_enrich.set_defaults(func=cmd_thewatchapi_enrich)
+
+    twa_price = twa_sub.add_parser(
+        "price-history", help="Standard plan+: indicative asking-price series"
+    )
+    scope = twa_price.add_mutually_exclusive_group(required=True)
+    scope.add_argument("--brand")
+    scope.add_argument("--model")
+    scope.add_argument("--reference")
+    twa_price.add_argument("--date-from")
+    twa_price.add_argument("--date-to")
+    _token_arg(twa_price)
+    twa_price.set_defaults(func=cmd_thewatchapi_price_history)
 
     index_cmd = subparsers.add_parser("index", help="print a hedonic index")
     index_cmd.add_argument("--reference")

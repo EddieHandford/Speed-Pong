@@ -133,12 +133,44 @@ the schema and waiting for an ingester. That is the right next thing to build
 — and the only way to backtest anything before you have collected two years
 of listings yourself.
 
+### thewatchapi.com (`sources/thewatchapi.py`)
+
+An actual documented REST API with a free tier, unlike Chrono24. Built
+against the real docs and their example responses, so unlike `chrono24.py`
+nothing here is a guess. Set `THEWATCHAPI_TOKEN` (never commit a token to the
+repo) and:
+
+```bash
+# cheap: reference/list, "All plans" -- one call per brand
+python3 -m watchlab thewatchapi sync-brand Rolex
+
+# HIGH USAGE: model/search, one call per reference -- opt in explicitly,
+# never loop this across a brand's whole catalogue
+python3 -m watchlab thewatchapi enrich --brand Rolex --reference 116520 116500LN
+
+# Standard plan+: indicative ASKING price series (not transactions --
+# same caveat as everything else here), stored separately from the
+# hedonic index so the two are never confused
+python3 -m watchlab thewatchapi price-history --reference 116520
+```
+
+`sync-brand` populates `refs` with brand + reference only, which is already
+enough to lift `normalize.parse_title` from regex-guessing to catalogue
+matching (confidence 0.4 → 0.7). `enrich` adds case size and production
+years for a specific watchlist, at a real credit cost — do this selectively.
+`price-history` writes into `provider_price_series`, deliberately **not**
+`index_points`: thewatchapi's series is a pre-aggregated asking-price
+average with no visibility into whether it controls for a changing listing
+mix, so it is a cross-check against the hedonic index, never a substitute
+for it.
+
 ## Layout
 
 ```
 watchlab/
   db.py                schema, connection, FX conversion
   normalize.py         title -> canonical record
+  catalogue.py         provider-agnostic reference-catalogue importer
   hedonic.py           OLS/ridge, time-dummy index (no numpy)
   metrics.py           microstructure metrics, cost model
   ingest.py            raw listings -> normalised rows, lifecycle
@@ -146,9 +178,10 @@ watchlab/
   cli.py               python -m watchlab ...
   web/dashboard.html   the dashboard
   sources/
-    chrono24.py        listing scraper (UNVERIFIED selectors)
-    synthetic.py       simulated market with a known true path
-tests/                 51 tests
+    chrono24.py        listing scraper (UNVERIFIED selectors -- no live access)
+    thewatchapi.py      catalogue + price-history client (verified vs real docs)
+    synthetic.py         simulated market with a known true path
+tests/                 98 tests
 ```
 
 ## Not built yet

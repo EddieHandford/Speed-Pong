@@ -125,6 +125,26 @@ CREATE TABLE IF NOT EXISTS index_points (
     PRIMARY KEY (scope, period)
 );
 
+-- Pre-aggregated price series pulled from an external data provider (e.g.
+-- thewatchapi's brand/model/reference price-history endpoints).
+--
+-- This is deliberately NOT the same table as index_points. index_points is
+-- computed by hedonic.py from watchlab's own listing data, with condition,
+-- papers, box, age, country and seller type held constant, specifically to
+-- avoid measuring a changing listing mix as price movement. A provider's
+-- price series carries no visibility into whether it does anything similar;
+-- treat it as an external cross-check, never as a substitute for the index.
+CREATE TABLE IF NOT EXISTS provider_price_series (
+    provider    TEXT NOT NULL,          -- e.g. 'thewatchapi'
+    scope_type  TEXT NOT NULL,          -- 'brand' | 'model' | 'reference'
+    scope_value TEXT NOT NULL,
+    observed_at TEXT NOT NULL,          -- ISO-8601 date
+    price_cents INTEGER NOT NULL,
+    currency    TEXT NOT NULL,
+    fetched_at  TEXT NOT NULL,
+    PRIMARY KEY (provider, scope_type, scope_value, observed_at)
+);
+
 -- Provenance for every fetch, so a crawl can be resumed and audited and so we
 -- never re-request a page we already have.
 CREATE TABLE IF NOT EXISTS fetch_log (

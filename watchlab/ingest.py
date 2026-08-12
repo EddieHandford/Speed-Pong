@@ -9,6 +9,7 @@ from typing import Iterable, Sequence
 
 from . import normalize
 from .sources.chrono24 import RawListing
+from .sources.thewatchapi import price_series_rows
 
 
 @dataclass
@@ -244,3 +245,31 @@ def hedonic_rows(
             }
         )
     return out
+
+
+def store_provider_price_series(
+    conn: sqlite3.Connection,
+    provider: str,
+    scope_type: str,
+    scope_value: str,
+    payload: dict,
+    fetched_at: str | None = None,
+) -> int:
+    """Store a provider price-history response into ``provider_price_series``.
+
+    Kept in its own table, never merged into ``index_points``: a provider's
+    series carries no information about whether it controls for a changing
+    listing mix the way the hedonic index does, so conflating the two would
+    let an unaudited external number masquerade as watchlab's own estimate.
+    """
+    fetched_at = fetched_at or _dt.date.today().isoformat()
+    rows = list(price_series_rows(provider, scope_type, scope_value, payload, fetched_at))
+    conn.executemany(
+        """
+        INSERT OR REPLACE INTO provider_price_series
+            (provider, scope_type, scope_value, observed_at, price_cents, currency, fetched_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        """,
+        rows,
+    )
+    return len(rows)
