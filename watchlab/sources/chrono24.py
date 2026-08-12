@@ -14,10 +14,20 @@ client will not pass. Two consequences:
     session, point the parser at them, and calibrate the selectors. That keeps
     request volume at zero and is the only approach that reliably works.
 
-The parsers below were written without live access to the site, so the CSS
-class names in ``SELECTORS`` are unverified guesses and will need fixing on
-first use. ``parse_listing_html`` therefore tries schema.org JSON-LD first,
-which is a published standard and far less likely to drift than class names.
+The parsers below were originally written without live access to the site, so
+the CSS class names in ``SELECTORS`` were unverified guesses. ``parse_jsonld``
+has since been fixed against a real saved search-results page (2026-08-12):
+Chrono24's ``@graph`` carries a single ``AggregateOffer`` node with
+``priceCurrency`` at the node level and a bare ``offers`` array -- no
+Product/IndividualProduct wrapper, and no per-offer id, so the listing id is
+parsed out of each offer's URL (Chrono24 URLs always end ``--id<digits>.htm``).
+Notably absent from that JSON-LD: condition, seller country, seller type --
+none of it is there. Some of it often recovers anyway because the offer
+``name`` is the seller's free-text title (e.g. "... Good Condition Box",
+"... Full set"), which ``normalize.parse_title`` already knows how to read;
+what it can't recover, ``normalize`` correctly leaves ``None`` rather than
+guessing. ``parse_dom`` (``SELECTORS``) remains an unverified fallback for
+whatever page shape doesn't carry this JSON-LD.
 Run ``python -m watchlab calibrate <saved.html>`` to see what each strategy
 extracts from a real page.
 """
@@ -42,15 +52,18 @@ BASE_URL = "https://www.chrono24.com"
 USER_AGENT = "watchlab/0.1 (personal research; contact: set WATCHLAB_CONTACT)"
 DEFAULT_DELAY_SECONDS = 8.0
 
-# Unverified. Fix these against a real saved page before trusting the output.
+# listing_id_attr verified against a real saved search-results page
+# (2026-08-12): each listing card is a
+# `<div class="js-listing-item-container ... wt-search-result" data-search-hash="...">`.
+# The card's own text (title, price, seller badge, location) all fall inside
+# it, so _AttributeHarvester's flattened text is enough for parse_dom's
+# regex-based price extraction even without dedicated per-field selectors.
 SELECTORS = {
-    "listing_container_attr": ("div", "class", re.compile(r"article-item|js-article-item")),
-    "listing_id_attr": "data-article-id",
-    "price_attr": ("span", "class", re.compile(r"currency|price")),
-    "title_attr": ("div", "class", re.compile(r"text-sm text-sm-md text-bold|article-title")),
+    "listing_id_attr": "data-search-hash",
 }
 
 _ISO_COUNTRY = re.compile(r"\b([A-Z]{2})\b")
+_LISTING_ID_IN_URL = re.compile(r"--id(\d+)\.htm")
 
 
 @dataclass
@@ -245,64 +258,41 @@ def _walk(node: Any) -> Iterator[dict]:
 
 
 def parse_jsonld(html: str) -> list[RawListing]:
-    """Pull schema.org Product/Offer entries out of the page."""
+    """Pull the AggregateOffer's per-listing Offer entries out of a page.
+
+    Chrono24 search-results pages carry one ``AggregateOffer`` node per page,
+    ``priceCurrency`` set once at that node (not per offer), and a bare
+    ``offers`` array with no Product/IndividualProduct wrapper and no
+    per-offer identifier -- so the listing id comes out of each offer's URL.
+    """
     extractor = _JsonLdExtractor()
     extractor.feed(html)
 
     out: list[RawListing] = []
     for block in extractor.blocks:
         for node in _walk(block):
-            node_type = node.get("@type")
-            types = node_type if isinstance(node_type, list) else [node_type]
-            if not any(t in ("Product", "IndividualProduct") for t in types if t):
+            if node.get("@type") != "AggregateOffer":
                 continue
-
-            offer = next(
-                (o for o in _walk(node.get("offers")) if o.get("@type") in ("Offer", "AggregateOffer")),
-                {},
-            )
-            identifier = (
-                node.get("productID") or node.get("sku") or node.get("mpn")
-                or offer.get("sku") or node.get("@id") or node.get("name")
-            )
-            if not identifier:
-                continue
-
-            price = offer.get("price") or offer.get("lowPrice")
-            seller = offer.get("seller") or {}
-            address = seller.get("address") if isinstance(seller, dict) else None
-            country = None
-            if isinstance(address, dict):
-                country = address.get("addressCountry")
-                if isinstance(country, dict):
-                    country = country.get("name")
-
-            out.append(
-                RawListing(
-                    listing_id=f"c24:{identifier}",
-                    url=node.get("url") or offer.get("url"),
-                    title=node.get("name"),
-                    price_text=str(price) if price is not None else None,
-                    currency=offer.get("priceCurrency"),
-                    condition_text=_condition_from_schema(offer.get("itemCondition")),
-                    seller_country=_country_code(country),
-                    extras={"source_strategy": "jsonld"},
+            currency = node.get("priceCurrency")
+            for offer in node.get("offers") or []:
+                if not isinstance(offer, dict) or offer.get("@type") != "Offer":
+                    continue
+                url = offer.get("url")
+                match = _LISTING_ID_IN_URL.search(url or "")
+                if not match:
+                    continue
+                price = offer.get("price")
+                out.append(
+                    RawListing(
+                        listing_id=f"c24:{match.group(1)}",
+                        url=url,
+                        title=offer.get("name"),
+                        price_text=str(price) if price is not None else None,
+                        currency=currency,
+                        extras={"source_strategy": "jsonld"},
+                    )
                 )
-            )
     return out
-
-
-def _condition_from_schema(value: Any) -> str | None:
-    if not isinstance(value, str):
-        return None
-    tail = value.rsplit("/", 1)[-1].lower()
-    if "new" in tail:
-        return "new"
-    if "refurbished" in tail:
-        return "very_good"
-    if "used" in tail:
-        return "good"
-    return None
 
 
 def _country_code(value: Any) -> str | None:

@@ -145,10 +145,41 @@ problem is real in auction lot mix too, not just in Chrono24 listings.
 
 ## Getting real data in
 
-`sources/chrono24.py` is written but **unverified** — it was built without
-live access to the site, so the CSS selectors in `SELECTORS` are guesses. It
-tries schema.org JSON-LD first, which is a published standard and much less
-likely to drift than class names.
+For anything sub-£1000, prefer eBay's Browse API (below) — it's a free,
+structured REST API with no scraping, no ToS conflict, and no selectors to
+keep fixing. Chrono24's saved-page workflow is what to reach for when a
+watch's real market lives there instead (higher-end pieces, mostly).
+
+### eBay Browse API (`sources/ebay.py`)
+
+A real, documented REST API, free to register for, with a 5,000-call/day
+default quota — no scraping, no ToS conflict, no HTML selectors to keep
+fixing, and no manual page-saving. Built against the documented OAuth2
+client-credentials grant and the `item_summary/search` resource. Set
+`EBAY_CLIENT_ID` / `EBAY_CLIENT_SECRET` (a free application keyset from
+https://developer.ebay.com — production keys, not sandbox, since sandbox has
+no real listings; never commit them to the repo) and:
+
+```bash
+python3 -m watchlab ebay ingest --query "Seiko SRPD55K1" "Casio GA-2100-1A1"
+# or, for a longer list:
+python3 -m watchlab ebay ingest --file watchlists/budget_under_1000_queries.txt --date 2026-08-19
+```
+
+Goes straight into `listings`/`listing_snapshots` via the same
+`ingest.upsert_listings` path `chrono24.py` uses (`source="ebay"`), so
+`index`, `screen` and `report` all work on it unmodified. Condition is
+mapped from eBay's documented condition strings on a best-effort basis; an
+unrecognised string is left `None` rather than guessed, same rule
+`normalize.py` already applies to box/papers.
+
+### Chrono24 listings (`sources/chrono24.py`)
+
+`parse_jsonld` has been fixed against a real saved search-results page
+(2026-08-12): Chrono24's `@graph` carries a single `AggregateOffer` node with
+a bare `offers` array, not the Product/IndividualProduct wrapper originally
+guessed. The DOM fallback (`SELECTORS`) remains unverified for whatever page
+shape doesn't carry that JSON-LD.
 
 Chrono24's terms prohibit automated collection and the site runs bot
 protection, so a plain HTTP client will mostly collect challenge pages. The
@@ -240,15 +271,17 @@ watchlab/
   hedonic.py           OLS/ridge, time-dummy index (no numpy)
   metrics.py           microstructure metrics, cost model
   ingest.py            raw listings -> normalised rows, lifecycle
+  report.py            multi-reference ranking: net-of-cost return, top/bottom N
   server.py            stdlib HTTP server + JSON API
   cli.py               python -m watchlab ...
   web/dashboard.html   the dashboard
   sources/
-    chrono24.py        listing scraper (UNVERIFIED selectors -- no live access)
+    chrono24.py        listing scraper (JSON-LD verified 2026-08-12; DOM fallback unverified)
     auction_houses.py  auction lot HTML parser (UNVERIFIED -- no live access)
     thewatchapi.py      catalogue + price-history client (verified vs real docs)
+    ebay.py             Browse API client (verified vs real docs; no scraping, free tier)
     synthetic.py         simulated market + auction sales, both with a known true path
-tests/                 123 tests
+tests/                 148 tests
 ```
 
 ## Not built yet

@@ -1,0 +1,17 @@
+# Sub-£1000 watchlist as eBay Browse API search queries, one per line.
+#
+# Used by:
+#   python -m watchlab ebay ingest --file watchlists\budget_under_1000_queries.txt --date 2026-08-19
+#
+# Same 10 references as watchlists\budget_under_1000.txt, phrased as
+# "Brand Reference" search strings rather than bare reference numbers.
+Seiko SRPD55K1
+Seiko SRPC91K1
+Casio GA-2100-1A1
+Citizen BN0150-28E
+Tissot T137.407.11.041.00
+Orient RA-AC0001S
+Orient RA-AA0004L
+Hamilton H69439931
+Timex TW2T22500
+Certina C032.407.11.051.00

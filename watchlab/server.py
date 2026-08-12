@@ -14,7 +14,7 @@ import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
-from . import auctions, db, hedonic, ingest, metrics
+from . import auctions, db, genetic, hedonic, ingest, metrics, report
 
 WEB_DIR = os.path.join(os.path.dirname(__file__), "web")
 
@@ -142,6 +142,76 @@ def _premium(fit: hedonic.FitResult, column: str) -> float | None:
     return round(coefficient, 4) if coefficient is not None else None
 
 
+def _report_payload(conn, query: dict[str, list[str]]) -> dict[str, Any]:
+    """Net-of-cost hedonic return per reference, ranked -- the /report CLI command's data."""
+    references = query.get("reference") or metrics.all_references(conn, min_listings=1)
+    max_price = query.get("max_price_eur", [None])[0]
+    shipping = float(query.get("shipping_insurance_eur", ["30"])[0])
+    top_n = int(query.get("top", ["10"])[0])
+
+    costs = metrics.CostModel(shipping_insurance_eur=shipping)
+    ranked = report.rank_references(
+        conn, references, max_price_eur=float(max_price) if max_price else None, costs=costs,
+    )
+    top, bottom = report.top_bottom(ranked, n=top_n)
+
+    def _row(r: report.RankedReference) -> dict[str, Any]:
+        return {
+            "reference": r.reference, "brand": r.brand, "n_obs": r.n_obs,
+            "median_ask_eur": r.median_ask_eur,
+            "gross_cagr": round(r.gross_cagr, 4) if r.gross_cagr is not None else None,
+            "net_cagr": round(r.net_cagr, 4) if r.net_cagr is not None else None,
+            "r_squared": round(r.r_squared, 3) if r.r_squared is not None else None,
+            "skip_reason": r.skip_reason,
+        }
+
+    return {
+        "top": [_row(r) for r in top],
+        "bottom": [_row(r) for r in bottom],
+        "skipped": [_row(r) for r in ranked if r.net_cagr is None],
+        "n_ranked": len(ranked) - sum(1 for r in ranked if r.net_cagr is None),
+        "n_total": len(ranked),
+    }
+
+
+def _genetic_payload(conn, query: dict[str, list[str]]) -> dict[str, Any]:
+    """Walk-forward GA screen vs equal-weight buy-and-hold -- see genetic.py before trusting this."""
+    references = query.get("reference") or metrics.all_references(conn, min_listings=1)
+    shipping = float(query.get("shipping_insurance_eur", ["30"])[0])
+    seed = query.get("seed", [None])[0]
+
+    costs = metrics.CostModel(shipping_insurance_eur=shipping)
+    result = genetic.run_ga(
+        conn, references,
+        population_size=int(query.get("population", ["30"])[0]),
+        generations=int(query.get("generations", ["25"])[0]),
+        top_k=int(query.get("top_k", ["3"])[0]),
+        checkpoint_every_months=int(query.get("checkpoint_months", ["3"])[0]),
+        horizon_months=int(query.get("horizon_months", ["6"])[0]),
+        complexity_penalty=float(query.get("complexity_penalty", ["0.02"])[0]),
+        seed=int(seed) if seed else None,
+        costs=costs,
+    )
+    return {
+        "n_references": len(references),
+        "top_k": result.top_k,
+        "n_train_checkpoints": result.n_train_checkpoints,
+        "n_test_checkpoints": result.n_test_checkpoints,
+        "weights": {k: round(v, 4) for k, v in result.best_weights.items()},
+        "fitness_by_generation": [round(f, 4) for f in result.fitness_by_generation],
+        "train_net_return": (
+            round(result.train_net_return, 4) if result.train_net_return is not None else None
+        ),
+        "test_net_return": (
+            round(result.test_net_return, 4) if result.test_net_return is not None else None
+        ),
+        "test_buy_and_hold_net_return": (
+            round(result.test_buy_and_hold_net_return, 4)
+            if result.test_buy_and_hold_net_return is not None else None
+        ),
+    }
+
+
 class Handler(BaseHTTPRequestHandler):
     db_path: str = db.DEFAULT_DB_PATH
 
@@ -184,12 +254,15 @@ class Handler(BaseHTTPRequestHandler):
         with db.session(self.db_path) as conn:
             if parsed.path == "/api/screen":
                 window = int(query.get("window", ["90"])[0])
-                self._send(
-                    {
-                        "rows": metrics.screen(conn, window_days=window),
-                        "costs": metrics.CostModel().__dict__,
-                    }
-                )
+                rows = metrics.screen(conn, window_days=window)
+                brand = query.get("brand", [None])[0]
+                if brand:
+                    rows = [r for r in rows if (r.get("brand") or "").lower() == brand.lower()]
+                max_price = query.get("max_price_eur", [None])[0]
+                if max_price:
+                    limit = float(max_price)
+                    rows = [r for r in rows if r["median_ask_eur"] is None or r["median_ask_eur"] <= limit]
+                self._send({"rows": rows, "costs": metrics.CostModel().__dict__})
             elif parsed.path == "/api/references":
                 self._send({"references": metrics.all_references(conn)})
             elif parsed.path == "/api/index":
@@ -204,6 +277,10 @@ class Handler(BaseHTTPRequestHandler):
                     self._send({"error": "reference is required"}, status=400)
                     return
                 self._send(_auction_index_payload(conn, reference))
+            elif parsed.path == "/api/report":
+                self._send(_report_payload(conn, query))
+            elif parsed.path == "/api/genetic":
+                self._send(_genetic_payload(conn, query))
             else:
                 self.send_error(404)
 

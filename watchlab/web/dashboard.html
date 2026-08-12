@@ -4,6 +4,15 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>watchlab</title>
+<script>
+  // Applied before first paint so there's no flash of the wrong theme.
+  // Dark is the default appearance until the viewer explicitly picks light.
+  (function () {
+    var saved = null;
+    try { saved = localStorage.getItem('watchlab-theme'); } catch (e) {}
+    document.documentElement.setAttribute('data-theme', saved || 'dark');
+  })();
+</script>
 <style>
   :root {
     color-scheme: light;
@@ -16,52 +25,89 @@
     --series-1: #2a78d6;
     --series-2: #eb6834;
     --series-3: #1baf7a;
+    --accent:   #1baf7a;
     --good: #008300;
     --bad:  #e34948;
     --grid: #ebeae5;
+    --glow: 0 0 0 rgba(0,0,0,0);
+    --mono: ui-monospace, "Cascadia Code", "SF Mono", "JetBrains Mono", Consolas, monospace;
   }
   @media (prefers-color-scheme: dark) {
     :root:not([data-theme="light"]) {
       color-scheme: dark;
-      --surface-0: #121211;
-      --surface-1: #1a1a19;
-      --border:    #33322e;
-      --text-primary:   #ffffff;
-      --text-secondary: #c3c2b7;
-      --text-muted:     #8d8b81;
+      --surface-0: #0d0f0e;
+      --surface-1: #141716;
+      --border:    #262b29;
+      --text-primary:   #eef4f1;
+      --text-secondary: #a9b3ae;
+      --text-muted:     #6d7672;
       --series-1: #3987e5;
       --series-2: #d95926;
-      --series-3: #199e70;
-      --good: #46a44a;
-      --bad:  #e66767;
-      --grid: #262523;
+      --series-3: #22d3a0;
+      --accent:   #22d3a0;
+      --good: #3fd07a;
+      --bad:  #f0645f;
+      --grid: #1d2120;
+      --glow: 0 0 22px rgba(34,211,160,0.12);
     }
   }
   :root[data-theme="dark"] {
     color-scheme: dark;
-    --surface-0: #121211;
-    --surface-1: #1a1a19;
-    --border:    #33322e;
-    --text-primary:   #ffffff;
-    --text-secondary: #c3c2b7;
-    --text-muted:     #8d8b81;
+    --surface-0: #0d0f0e;
+    --surface-1: #141716;
+    --border:    #262b29;
+    --text-primary:   #eef4f1;
+    --text-secondary: #a9b3ae;
+    --text-muted:     #6d7672;
     --series-1: #3987e5;
     --series-2: #d95926;
-    --series-3: #199e70;
-    --good: #46a44a;
-    --bad:  #e66767;
-    --grid: #262523;
+    --series-3: #22d3a0;
+    --accent:   #22d3a0;
+    --good: #3fd07a;
+    --bad:  #f0645f;
+    --grid: #1d2120;
+    --glow: 0 0 22px rgba(34,211,160,0.12);
   }
 
   * { box-sizing: border-box; }
+  html { scrollbar-color: var(--border) transparent; }
   body {
-    margin: 0; background: var(--surface-0); color: var(--text-primary);
+    margin: 0; color: var(--text-primary);
+    background:
+      radial-gradient(circle at 1px 1px, var(--grid) 1px, transparent 0) 0 0 / 22px 22px,
+      var(--surface-0);
     font: 14px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
   }
+  ::selection { background: var(--accent); color: var(--surface-0); }
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 6px; }
+
   .wrap { max-width: 1180px; margin: 0 auto; padding: 28px 20px 64px; }
-  header { margin-bottom: 8px; }
-  h1 { font-size: 20px; margin: 0 0 4px; letter-spacing: -0.01em; }
-  .sub { color: var(--text-secondary); margin: 0 0 20px; max-width: 68ch; }
+  header {
+    margin-bottom: 8px; display: flex; align-items: flex-start;
+    justify-content: space-between; gap: 20px;
+  }
+  .brand { display: flex; align-items: baseline; gap: 10px; }
+  h1 {
+    font: 700 20px/1 var(--mono); margin: 0; letter-spacing: -0.02em;
+  }
+  h1::before { content: '> '; color: var(--accent); }
+  h1::after {
+    content: ''; display: inline-block; width: 8px; height: 8px; margin-left: 8px;
+    border-radius: 50%; background: var(--accent); box-shadow: var(--glow);
+    animation: pulse 2.4s ease-in-out infinite; vertical-align: middle;
+  }
+  @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+  .sub { color: var(--text-secondary); margin: 4px 0 20px; max-width: 68ch; }
+  #theme-toggle {
+    font: 11px/1 var(--mono); text-transform: uppercase; letter-spacing: 0.06em;
+    padding: 7px 12px; border-radius: 5px; border: 1px solid var(--border);
+    background: var(--surface-1); color: var(--text-secondary); cursor: pointer;
+    white-space: nowrap;
+  }
+  #theme-toggle:hover { color: var(--accent); border-color: var(--accent); }
+
   .caveat {
     background: var(--surface-1); border: 1px solid var(--border);
     border-left: 3px solid var(--series-2);
@@ -69,24 +115,45 @@
     color: var(--text-secondary); font-size: 13px; max-width: 78ch;
   }
   .caveat strong { color: var(--text-primary); }
-  .card {
-    background: var(--surface-1); border: 1px solid var(--border);
-    border-radius: 8px; padding: 18px; margin-bottom: 22px;
+  .glossary-link {
+    display: inline-block; margin: 0 0 24px; font: 12px var(--mono);
+    color: var(--accent); text-decoration: none; letter-spacing: 0.02em;
   }
-  .card h2 { font-size: 14px; margin: 0 0 2px; letter-spacing: -0.005em; }
+  .glossary-link:hover { text-decoration: underline; }
+
+  .card {
+    position: relative; background: var(--surface-1); border: 1px solid var(--border);
+    border-radius: 6px; padding: 18px; margin-bottom: 22px; overflow: hidden;
+  }
+  .card::before {
+    content: ''; position: absolute; top: 0; left: 0; right: 0; height: 2px;
+    background: linear-gradient(90deg, var(--accent), transparent 65%); opacity: 0.7;
+  }
+  .card h2 {
+    font: 600 13px var(--mono); margin: 0 0 2px; letter-spacing: 0.01em;
+    text-transform: uppercase; color: var(--text-primary);
+  }
   .card .note { color: var(--text-muted); font-size: 12px; margin: 0 0 16px; }
   .controls { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-bottom: 16px; }
-  select, button {
-    font: inherit; padding: 6px 10px; border-radius: 6px;
-    border: 1px solid var(--border); background: var(--surface-1); color: var(--text-primary);
+  .controls label { font: 11px var(--mono); color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.03em; }
+  select, button, input {
+    font: 13px/1.3 var(--mono); padding: 6px 10px; border-radius: 5px;
+    border: 1px solid var(--border); background: var(--surface-0); color: var(--text-primary);
   }
-  button { cursor: pointer; }
+  button {
+    cursor: pointer; text-transform: uppercase; font-size: 11px; letter-spacing: 0.05em;
+    color: var(--text-secondary); transition: color .12s, border-color .12s, box-shadow .12s;
+  }
+  button:hover { color: var(--accent); border-color: var(--accent); box-shadow: var(--glow); }
+  select:focus, input:focus, button:focus {
+    outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
+  }
 
   .stats { display: flex; flex-wrap: wrap; gap: 28px; margin-bottom: 18px; }
-  .stat .label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-muted); }
-  .stat .value { font-size: 26px; font-variant-numeric: tabular-nums; letter-spacing: -0.02em; }
-  .stat .value.pos { color: var(--good); }
-  .stat .value.neg { color: var(--bad); }
+  .stat .label { font: 11px var(--mono); text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-muted); }
+  .stat .value { font: 26px/1.2 var(--mono); font-variant-numeric: tabular-nums; letter-spacing: -0.01em; }
+  .stat .value.pos { color: var(--good); text-shadow: 0 0 16px color-mix(in srgb, var(--good) 35%, transparent); }
+  .stat .value.neg { color: var(--bad); text-shadow: 0 0 16px color-mix(in srgb, var(--bad) 35%, transparent); }
   .stat .hint { font-size: 11px; color: var(--text-muted); }
 
   .legend { display: flex; gap: 18px; margin: 0 0 10px; font-size: 12px; color: var(--text-secondary); }
@@ -97,19 +164,20 @@
   svg { display: block; max-width: 100%; }
   .axis text { fill: var(--text-muted); font-size: 11px; }
   .axis line { stroke: var(--grid); }
-  .tick-label { fill: var(--text-muted); font-size: 11px; }
+  .tick-label { fill: var(--text-muted); font-size: 11px; font-family: var(--mono); }
 
   .tbl-scroll { overflow-x: auto; }
-  table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; }
+  table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; font-family: var(--mono); font-size: 13px; }
   th, td { padding: 8px 10px; text-align: right; border-bottom: 1px solid var(--border); white-space: nowrap; }
   th:first-child, td:first-child { text-align: left; }
   th {
-    font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em;
-    color: var(--text-muted); font-weight: 600; cursor: pointer; user-select: none;
+    font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em;
+    color: var(--text-muted); font-weight: 600; cursor: help; user-select: none;
+    border-bottom: 1px solid var(--border);
   }
-  th:hover { color: var(--text-primary); }
+  th:hover { color: var(--accent); }
   tbody tr:hover { background: var(--surface-0); }
-  tbody tr.sel { background: var(--surface-0); }
+  tbody tr.sel { background: var(--surface-0); box-shadow: inset 2px 0 0 var(--accent); }
   td.ref { font-weight: 600; cursor: pointer; }
   td.ref:hover { color: var(--series-1); }
   .muted { color: var(--text-muted); }
@@ -117,19 +185,33 @@
   #tip {
     position: fixed; pointer-events: none; opacity: 0; transition: opacity .1s;
     background: var(--surface-1); border: 1px solid var(--border); border-radius: 6px;
-    padding: 8px 10px; font-size: 12px; box-shadow: 0 4px 14px rgba(0,0,0,.14);
+    padding: 8px 10px; font-size: 12px; font-family: var(--mono);
+    box-shadow: 0 4px 14px rgba(0,0,0,.35), var(--glow);
     z-index: 10; min-width: 150px;
   }
   #tip .tp { color: var(--text-muted); margin-bottom: 4px; }
   #tip .row { display: flex; justify-content: space-between; gap: 14px; }
   #tip .row b { font-variant-numeric: tabular-nums; }
+
+  .glossary { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 22px; }
+  .glossary h3 {
+    font: 600 11px var(--mono); text-transform: uppercase; letter-spacing: 0.06em;
+    color: var(--accent); margin: 0 0 10px; padding-bottom: 6px; border-bottom: 1px solid var(--border);
+  }
+  .glossary dl { margin: 0; }
+  .glossary dt { font: 600 12px var(--mono); color: var(--text-primary); margin-top: 10px; }
+  .glossary dt:first-child { margin-top: 0; }
+  .glossary dd { margin: 2px 0 0; color: var(--text-secondary); font-size: 12.5px; line-height: 1.5; }
 </style>
 </head>
 <body>
 <div class="wrap">
   <header>
-    <h1>watchlab</h1>
-    <p class="sub">Quality-adjusted price indices and supply-side metrics for wristwatch references.</p>
+    <div>
+      <h1>watchlab</h1>
+      <p class="sub">Quality-adjusted price indices and supply-side metrics for wristwatch references.</p>
+    </div>
+    <button id="theme-toggle" type="button" aria-label="Toggle light/dark theme">Theme</button>
   </header>
 
   <p class="caveat">
@@ -139,6 +221,7 @@
     listing mix &mdash; but it still measures what sellers ask, not what buyers pay. Treat it
     as a screen that tells you where to look, never as a return forecast.
   </p>
+  <a class="glossary-link" href="#glossary">↓ what do these terms mean? — jump to glossary</a>
 
   <section class="card">
     <h2>Constant-quality index</h2>
@@ -183,23 +266,145 @@
       Ranked by a composite of days-on-market, price-cut rate, ask dispersion and churn.
       This is a screen, not a forecast. Click a reference to chart it.
     </p>
+    <div class="controls">
+      <label for="filter-brand">Brand</label>
+      <select id="filter-brand"><option value="">All</option></select>
+      <label for="filter-max-price">Max ask (EUR)</label>
+      <input id="filter-max-price" type="number" placeholder="no limit" style="width:110px">
+      <label for="filter-search">Search</label>
+      <input id="filter-search" type="text" placeholder="reference contains…" style="width:160px">
+      <span class="note" id="filter-count" style="margin:0;"></span>
+    </div>
     <div class="tbl-scroll">
       <table id="screen">
         <thead><tr>
-          <th data-k="reference">Reference</th>
+          <th data-k="reference" title="The manufacturer's reference number.">Reference</th>
           <th data-k="brand">Brand</th>
-          <th data-k="score">Score</th>
-          <th data-k="n_live">Live</th>
-          <th data-k="median_ask_eur">Median ask</th>
-          <th data-k="median_days_on_market">Days on mkt</th>
-          <th data-k="cut_rate">Cut rate</th>
-          <th data-k="median_cut_depth">Cut depth</th>
-          <th data-k="dispersion">Dispersion</th>
-          <th data-k="churn_ratio">New/gone</th>
-          <th data-k="hurdle_1y">Cost hurdle</th>
+          <th data-k="score" title="Composite of the columns below, 0-1, 1 = tight market. Not a return forecast.">Score</th>
+          <th data-k="n_live" title="Listings currently for sale.">Live</th>
+          <th data-k="median_ask_eur" title="Median asking price across live listings, in EUR. Not a transaction price.">Median ask</th>
+          <th data-k="median_days_on_market" title="Median days a listing sat before leaving the market.">Days on mkt</th>
+          <th data-k="cut_rate" title="Share of listings that have cut their asking price at least once.">Cut rate</th>
+          <th data-k="median_cut_depth" title="Median size of a price cut, among listings that cut.">Cut depth</th>
+          <th data-k="dispersion" title="Interquartile range of asking prices / median. Higher = sellers disagree more.">Dispersion</th>
+          <th data-k="churn_ratio" title="New listings / delistings over the window. Above 1 = supply growing.">New/gone</th>
+          <th data-k="hurdle_1y" title="Gross price rise needed in a year just to break even on a round trip.">Cost hurdle</th>
         </tr></thead>
         <tbody></tbody>
       </table>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>Net-of-cost return ranking</h2>
+    <p class="note">
+      Realised hedonic CAGR per reference, net of round-trip friction &mdash; top and bottom N.
+      Not a forecast: this is what already happened over each reference's own observed window.
+    </p>
+    <div class="controls">
+      <label for="report-max-price">Max ask (EUR)</label>
+      <input id="report-max-price" type="number" placeholder="no limit" style="width:110px">
+      <label for="report-shipping">Shipping+insurance/leg (EUR)</label>
+      <input id="report-shipping" type="number" value="30" style="width:90px">
+      <label for="report-top">Top/bottom N</label>
+      <input id="report-top" type="number" value="5" style="width:60px">
+      <button id="report-run">Refresh</button>
+      <span class="note" id="report-note" style="margin:0;"></span>
+    </div>
+    <div class="tbl-scroll">
+      <table id="report-top-tbl">
+        <thead><tr><th colspan="6" style="text-align:left;color:var(--good);">Top</th></tr>
+          <tr><th>Reference</th><th>Brand</th>
+            <th title="Hedonic CAGR after round-trip cost friction.">Net CAGR</th>
+            <th title="Hedonic CAGR before costs.">Gross</th>
+            <th title="Fresh listings the index was fit on.">n</th>
+            <th title="Median asking price, in EUR.">Median ask</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+    <div class="tbl-scroll" style="margin-top:14px;">
+      <table id="report-bottom-tbl">
+        <thead><tr><th colspan="6" style="text-align:left;color:var(--bad);">Bottom</th></tr>
+          <tr><th>Reference</th><th>Brand</th>
+            <th title="Hedonic CAGR after round-trip cost friction.">Net CAGR</th>
+            <th title="Hedonic CAGR before costs.">Gross</th>
+            <th title="Fresh listings the index was fit on.">n</th>
+            <th title="Median asking price, in EUR.">Median ask</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>Genetic strategy screen <span class="muted" style="font-weight:400;">(experimental)</span></h2>
+    <p class="note">
+      Evolves a weight vector over the same supply-side features above (plus price momentum),
+      walk-forward validated: fit on earlier checkpoints, scored unseen on later ones, always
+      reported next to equal-weight buy-and-hold on the identical out-of-sample window. This is
+      <strong>not</strong> a trading strategy &mdash; watches aren't day-tradeable, a single round
+      trip already costs ~18&ndash;20% &mdash; it's a GA-tuned generalisation of the supply-side
+      score above. Per this project's own design notes, buy-and-hold usually wins that comparison,
+      and this panel will say so plainly when it does.
+    </p>
+    <div class="controls">
+      <label for="ga-topk">Top K held</label>
+      <input id="ga-topk" type="number" value="3" style="width:60px">
+      <label for="ga-shipping">Shipping+insurance/leg (EUR)</label>
+      <input id="ga-shipping" type="number" value="30" style="width:90px">
+      <label for="ga-seed">Seed</label>
+      <input id="ga-seed" type="number" placeholder="random" style="width:80px">
+      <button id="ga-run">Run GA</button>
+      <span class="note" id="ga-note" style="margin:0;"></span>
+    </div>
+    <div class="stats" id="ga-stats"></div>
+    <div class="chart-scroll">
+      <svg id="ga-fitness-chart" width="1100" height="160" role="img" aria-label="GA fitness by generation"></svg>
+    </div>
+    <div class="chart-scroll" style="margin-top:6px;">
+      <svg id="ga-weights-chart" width="1100" height="150" role="img" aria-label="Evolved feature weights"></svg>
+    </div>
+  </section>
+
+  <section class="card" id="glossary">
+    <h2>Glossary</h2>
+    <p class="note">Every abbreviation and metric used above, in one place. Hover a column header anywhere for a one-line reminder.</p>
+    <div class="glossary">
+      <div>
+        <h3>Supply-side screen</h3>
+        <dl>
+          <dt>Score</dt><dd>Composite of the metrics below, scaled 0&ndash;1 where 1 reads &ldquo;tight market&rdquo;. A screen, not a return forecast.</dd>
+          <dt>Live</dt><dd>Number of listings currently for sale for this reference.</dd>
+          <dt>Median ask</dt><dd>Median asking price across live listings, converted to EUR. An ask, not a transaction.</dd>
+          <dt>Days on mkt / DOM</dt><dd>Median days a listing sat before it left the market. The data can't tell you whether it sold, was delisted, or expired &mdash; treat it as a liquidity proxy, never a sale record.</dd>
+          <dt>Cut rate</dt><dd>Share of listings that reduced their asking price at least once, measured against each listing's own peak ask.</dd>
+          <dt>Cut depth</dt><dd>Among listings that did cut their price, the median size of that reduction.</dd>
+          <dt>Dispersion</dt><dd>Inter-quartile range of asking prices divided by the median. Higher means sellers disagree more about what the watch is worth.</dd>
+          <dt>New/gone</dt><dd>Churn ratio: new listings divided by delistings over the window. Above 1 = supply growing; below 1 = supply draining.</dd>
+          <dt>Cost hurdle</dt><dd>Gross price rise needed over a year just to break even on a full round trip (buy + sell), given this project's ~18&ndash;20% friction assumption.</dd>
+        </dl>
+      </div>
+      <div>
+        <h3>Index panels</h3>
+        <dl>
+          <dt>Gross CAGR</dt><dd>Annualised growth rate of the quality-adjusted (hedonic) index, before costs.</dd>
+          <dt>Net of costs</dt><dd>The same CAGR after subtracting round-trip friction (fees, spread, shipping/insurance).</dd>
+          <dt>Papers premium</dt><dd>Estimated price premium for a listing sold with papers, relative to one without, from the index model.</dd>
+          <dt>Fit / R&sup2;</dt><dd>Share of price variation the model explains. Not purely a quality signal &mdash; a very homogeneous set of listings can also produce a high R&sup2;.</dd>
+          <dt>n / n obs</dt><dd>Number of observations (fresh listings, or auction sales) the index was fit on.</dd>
+          <dt>Houses</dt><dd>Distinct auction houses contributing sales to the transaction-based index.</dd>
+        </dl>
+      </div>
+      <div>
+        <h3>Genetic strategy screen</h3>
+        <dl>
+          <dt>Top K held</dt><dd>How many references the evolved screen selects to (hypothetically) hold each period.</dd>
+          <dt>Checkpoints (train/test)</dt><dd>Points in time the screen is evaluated at. Weights are evolved against train checkpoints only; test checkpoints are held out and never seen during evolution &mdash; that split is what &ldquo;walk-forward&rdquo; means.</dd>
+          <dt>Fitness</dt><dd>The GA's internal score per candidate: mean net return on train checkpoints, minus a penalty for a large weight vector.</dd>
+          <dt>Weights</dt><dd>How much each feature counts toward a reference's score, and in which direction &mdash; the sign is learned, not assumed.</dd>
+          <dt>Momentum</dt><dd>Trailing change in the hedonic index over the previous checkpoint interval &mdash; the one weight that's price-based rather than supply-side.</dd>
+          <dt>Buy-and-hold</dt><dd>The baseline the GA is graded against: equal-weight across the whole universe, no selection at all. Per this project's own design notes, it usually wins.</dd>
+        </dl>
+      </div>
     </div>
   </section>
 </div>
@@ -224,9 +429,161 @@ async function boot() {
 
   const screen = await (await fetch('/api/screen')).json();
   screenRows = screen.rows;
+
+  const brands = [...new Set(screenRows.map(r => r.brand).filter(Boolean))].sort();
+  const brandSel = document.getElementById('filter-brand');
+  brandSel.innerHTML = '<option value="">All</option>' + brands.map(b => `<option>${b}</option>`).join('');
+  brandSel.onchange = renderTable;
+  document.getElementById('filter-max-price').oninput = renderTable;
+  document.getElementById('filter-search').oninput = renderTable;
+
   renderTable();
 
+  document.getElementById('report-run').onclick = loadReport;
+  document.getElementById('ga-run').onclick = loadGenetic;
+  loadReport();
+
   if (refs.references.length) loadIndex(refs.references[0]);
+}
+
+function filteredScreenRows() {
+  const brand = document.getElementById('filter-brand').value;
+  const maxPrice = parseFloat(document.getElementById('filter-max-price').value);
+  const search = document.getElementById('filter-search').value.trim().toLowerCase();
+  return screenRows.filter(r => {
+    if (brand && r.brand !== brand) return false;
+    if (!isNaN(maxPrice) && r.median_ask_eur != null && r.median_ask_eur > maxPrice) return false;
+    if (search && !r.reference.toLowerCase().includes(search)) return false;
+    return true;
+  });
+}
+
+async function loadReport() {
+  const note = document.getElementById('report-note');
+  note.textContent = 'loading…';
+  const maxPrice = document.getElementById('report-max-price').value;
+  const shipping = document.getElementById('report-shipping').value || '30';
+  const top = document.getElementById('report-top').value || '5';
+  const params = new URLSearchParams({ shipping_insurance_eur: shipping, top });
+  if (maxPrice) params.set('max_price_eur', maxPrice);
+  const data = await (await fetch('/api/report?' + params)).json();
+
+  const row = r => `<tr>
+      <td class="ref">${r.reference}</td><td class="muted">${r.brand || '—'}</td>
+      <td class="${r.net_cagr > 0 ? '' : ''}">${fmtPct(r.net_cagr)}</td>
+      <td class="muted">${fmtPct(r.gross_cagr)}</td><td>${r.n_obs}</td><td>${fmtEur(r.median_ask_eur)}</td>
+    </tr>`;
+  document.querySelector('#report-top-tbl tbody').innerHTML = data.top.map(row).join('')
+    || '<tr><td colspan="6" class="muted">nothing indexed</td></tr>';
+  document.querySelector('#report-bottom-tbl tbody').innerHTML = data.bottom.map(row).join('')
+    || '<tr><td colspan="6" class="muted">nothing indexed</td></tr>';
+  note.textContent = `${data.n_ranked}/${data.n_total} references indexed`;
+  document.querySelectorAll('#report-top-tbl td.ref, #report-bottom-tbl td.ref').forEach(td =>
+    td.onclick = () => loadIndex(td.textContent));
+}
+
+async function loadGenetic() {
+  const note = document.getElementById('ga-note');
+  const btn = document.getElementById('ga-run');
+  note.textContent = 'evolving… (a few seconds)';
+  btn.disabled = true;
+  const seedEl = document.getElementById('ga-seed');
+  const params = new URLSearchParams({
+    top_k: document.getElementById('ga-topk').value || '3',
+    shipping_insurance_eur: document.getElementById('ga-shipping').value || '30',
+  });
+  if (seedEl.value) params.set('seed', seedEl.value);
+  try {
+    const data = await (await fetch('/api/genetic?' + params)).json();
+    loadGenetic.lastData = data;
+    renderGaStats(data);
+    renderGaFitnessChart(data.fitness_by_generation);
+    renderGaWeightsChart(data.weights);
+    note.textContent = `${data.n_train_checkpoints} train / ${data.n_test_checkpoints} test checkpoints, top-${data.top_k} of ${data.n_references}`;
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+function renderGaStats(d) {
+  const el = document.getElementById('ga-stats');
+  if (!d.n_train_checkpoints) {
+    el.innerHTML = '<div class="stat muted">not enough history for even one checkpoint</div>';
+    return;
+  }
+  const ga = d.test_net_return, bh = d.test_buy_and_hold_net_return;
+  let verdict = '';
+  if (ga != null && bh != null) {
+    verdict = ga > bh ? 'GA screen wins this run' : 'buy-and-hold wins this run';
+  }
+  el.innerHTML = [
+    statTile('GA screen (out-of-sample)', fmtPct(ga), ga > 0 ? 'pos' : 'neg', `top-${d.top_k} held, test window`),
+    statTile('Buy-and-hold (out-of-sample)', fmtPct(bh), bh > 0 ? 'pos' : 'neg', 'equal-weight, whole universe'),
+    statTile('Verdict', verdict || '—', '', `${d.n_test_checkpoints} test checkpoint(s) — not enough to generalise`),
+  ].join('');
+}
+
+function renderGaFitnessChart(series) {
+  const svg = document.getElementById('ga-fitness-chart');
+  svg.innerHTML = '';
+  if (!series || series.length < 2) return;
+  const W = 1100, H = 160, L = 60, R = 20, T = 14, B = 24;
+  const iw = W - L - R, ih = H - T - B;
+  const lo = Math.min(...series), hi = Math.max(...series);
+  const pad = (hi - lo) * 0.15 || 0.01;
+  const yMin = lo - pad, yMax = hi + pad;
+  const x = i => L + (series.length === 1 ? 0 : (i / (series.length - 1)) * iw);
+  const y = v => T + ih - ((v - yMin) / (yMax - yMin)) * ih;
+  const ns = 'http://www.w3.org/2000/svg';
+  const add = (tag, attrs) => {
+    const el = document.createElementNS(ns, tag);
+    for (const k in attrs) el.setAttribute(k, attrs[k]);
+    svg.appendChild(el);
+    return el;
+  };
+  add('text', { x: L, y: 12, class: 'tick-label' }).textContent = 'train fitness (best-so-far) by generation';
+  const path = series.map((v, i) => `${i ? 'L' : 'M'}${x(i)},${y(v)}`).join(' ');
+  add('path', { d: path, fill: 'none', stroke: 'var(--series-1)', 'stroke-width': 2,
+                'stroke-linejoin': 'round', 'stroke-linecap': 'round' });
+  add('text', { x: L, y: H - 6, class: 'tick-label' }).textContent = 'gen 0';
+  add('text', { x: L + iw, y: H - 6, class: 'tick-label', 'text-anchor': 'end' }).textContent =
+    'gen ' + (series.length - 1);
+}
+
+function renderGaWeightsChart(weights) {
+  const svg = document.getElementById('ga-weights-chart');
+  svg.innerHTML = '';
+  const entries = Object.entries(weights || {});
+  if (!entries.length) return;
+  const W = 1100, H = 150, L = 130, R = 60, T = 10, B = 10;
+  const iw = W - L - R;
+  const rowH = (H - T - B) / entries.length;
+  const maxAbs = Math.max(...entries.map(([, v]) => Math.abs(v)), 0.01);
+  const mid = L + iw / 2;
+  const ns = 'http://www.w3.org/2000/svg';
+  const add = (tag, attrs) => {
+    const el = document.createElementNS(ns, tag);
+    for (const k in attrs) el.setAttribute(k, attrs[k]);
+    svg.appendChild(el);
+    return el;
+  };
+  add('line', { x1: mid, x2: mid, y1: T, y2: H - B, stroke: 'var(--grid)', 'stroke-width': 1 });
+  entries.forEach(([name, value], i) => {
+    const cy = T + rowH * i + rowH / 2;
+    const halfW = (Math.abs(value) / maxAbs) * (iw / 2 - 8);
+    const barX = value >= 0 ? mid : mid - halfW;
+    add('rect', { x: barX, y: cy - 8, width: Math.max(halfW, 1), height: 16,
+                  fill: value >= 0 ? 'var(--good)' : 'var(--bad)', rx: 3 });
+    add('text', { x: L - 10, y: cy + 4, class: 'tick-label', 'text-anchor': 'end' }).textContent = name;
+    // Placed on the empty side of the zero line -- opposite the bar itself --
+    // so it never sits on top of the (possibly low-contrast) fill colour, and
+    // never collides with the row-label column the way anchoring at a long
+    // bar's outer tip would (that tip can land right next to that column).
+    add('text', {
+      x: value >= 0 ? mid - 6 : mid + 6, y: cy + 4, class: 'tick-label',
+      'text-anchor': value >= 0 ? 'end' : 'start',
+    }).textContent = value.toFixed(3);
+  });
 }
 
 async function loadIndex(reference) {
@@ -402,7 +759,9 @@ function renderChart(d, svgId, primaryColor, primaryLabel) {
 }
 
 function renderTable() {
-  const rows = [...screenRows].sort((a, b) => {
+  const filtered = filteredScreenRows();
+  document.getElementById('filter-count').textContent = `${filtered.length}/${screenRows.length} references`;
+  const rows = [...filtered].sort((a, b) => {
     const x = a[sortKey], y = b[sortKey];
     if (x == null) return 1;
     if (y == null) return -1;
@@ -438,6 +797,26 @@ document.querySelectorAll('#screen th').forEach(th => {
     renderTable();
   };
 });
+
+const themeToggle = document.getElementById('theme-toggle');
+function syncThemeLabel() {
+  const current = document.documentElement.getAttribute('data-theme') || 'dark';
+  themeToggle.textContent = current === 'dark' ? '☾ dark' : '☀ light';
+}
+themeToggle.onclick = () => {
+  const next = (document.documentElement.getAttribute('data-theme') || 'dark') === 'dark' ? 'light' : 'dark';
+  document.documentElement.setAttribute('data-theme', next);
+  try { localStorage.setItem('watchlab-theme', next); } catch (e) {}
+  syncThemeLabel();
+  // Re-render the SVG charts: their colours are read from CSS vars at draw
+  // time, not live-bound, so a theme flip needs a redraw to pick the new ones up.
+  if (current) loadIndex(current.reference);
+  if (loadGenetic.lastData) {
+    renderGaFitnessChart(loadGenetic.lastData.fitness_by_generation);
+    renderGaWeightsChart(loadGenetic.lastData.weights);
+  }
+};
+syncThemeLabel();
 
 boot();
 </script>

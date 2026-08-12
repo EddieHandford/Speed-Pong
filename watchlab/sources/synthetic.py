@@ -86,6 +86,25 @@ DEFAULT_UNIVERSE = [
 ]
 
 
+# Same generator, a different universe: everyday sub-EUR1000 watches instead of
+# the luxury validation set above. auction_sales_per_year=0 throughout --
+# Phillips/Christie's/Sotheby's/Bonhams/Antiquorum don't meaningfully deal in
+# this segment, so simulating an auction market here would be inventing data
+# no real source will ever back up.
+BUDGET_UNIVERSE = [
+    RefSpec("SRPD55K1", "Seiko", "5 Sports", 190, 0.02, 0.10, 3.0, 0),
+    RefSpec("SRPC91K1", "Seiko", "Turtle Save The Ocean", 480, 0.05, 0.14, 1.6, 0),
+    RefSpec("GA-2100-1A1", "Casio", "G-Shock CasiOak", 95, 0.01, 0.12, 4.0, 0),
+    RefSpec("BN0150-28E", "Citizen", "Promaster Diver", 210, 0.00, 0.09, 2.2, 0),
+    RefSpec("T137.407.11.041.00", "Tissot", "PRX Powermatic 80", 720, 0.03, 0.10, 1.8, 0),
+    RefSpec("RA-AC0001S", "Orient", "Bambino V4", 160, -0.01, 0.11, 1.4, 0),
+    RefSpec("RA-AA0004L", "Orient", "Kamasu", 260, 0.02, 0.10, 1.3, 0),
+    RefSpec("H69439931", "Hamilton", "Khaki Field Mechanical", 480, 0.015, 0.09, 1.5, 0),
+    RefSpec("TW2T22500", "Timex", "Marlin Automatic", 180, -0.02, 0.13, 1.2, 0),
+    RefSpec("C032.407.11.051.00", "Certina", "DS Action Diver", 600, 0.025, 0.11, 1.0, 0),
+]
+
+
 def _month(day: _dt.date) -> str:
     return f"{day.year:04d}-{day.month:02d}"
 

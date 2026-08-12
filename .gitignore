@@ -1,5 +1,8 @@
 __pycache__/
 *.pyc
-watchlab.sqlite3
-watchlab.sqlite3-*
+*.sqlite3
+*.sqlite3-*
 .cache/
+.thewatchapi_cache/
+.ebay_cache/
+data/chrono24/

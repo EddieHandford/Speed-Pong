@@ -1,0 +1,18 @@
+# Sub-£1000 watchlist, one reference per line.
+#
+# Used by:
+#   python -m watchlab report --file watchlists\budget_under_1000.txt --max-price-eur 1170
+#
+# £1000 converted to EUR at the FX rate seeded in watchlab.sources.synthetic
+# (GBP -> EUR ~1.17); adjust --max-price-eur if you're pricing in a different
+# currency or want a different cutoff.
+SRPD55K1
+SRPC91K1
+GA-2100-1A1
+BN0150-28E
+T137.407.11.041.00
+RA-AC0001S
+RA-AA0004L
+H69439931
+TW2T22500
+C032.407.11.051.00

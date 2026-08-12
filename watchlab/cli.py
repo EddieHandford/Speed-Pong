@@ -8,8 +8,9 @@ import json
 import os
 import sys
 
-from . import auctions, catalogue, db, hedonic, ingest, metrics
+from . import auctions, catalogue, db, genetic, hedonic, ingest, metrics, report
 from .sources import auction_houses, chrono24, synthetic
+from .sources import ebay as _ebay
 from .sources import thewatchapi as _thewatchapi
 
 
@@ -17,14 +18,16 @@ def cmd_demo(args: argparse.Namespace) -> int:
     """Build a database from the simulator so the dashboard has something to show."""
     end = _dt.date.today()
     start = end - _dt.timedelta(days=args.days)
+    universe = synthetic.BUDGET_UNIVERSE if args.universe == "budget" else None
     with db.session(args.db) as conn:
         conn.execute("DELETE FROM listing_snapshots")
         conn.execute("DELETE FROM listings")
         synthetic.seed_fx(conn, start.isoformat())
-        synthetic.generate(conn, start, end, seed=args.seed)
+        synthetic.generate(conn, start, end, universe=universe, seed=args.seed)
         n = conn.execute("SELECT COUNT(*) FROM listings").fetchone()[0]
         s = conn.execute("SELECT COUNT(*) FROM listing_snapshots").fetchone()[0]
-    print(f"simulated {n} listings / {s} snapshots over {args.days} days into {args.db}")
+    print(f"simulated {n} listings / {s} snapshots over {args.days} days into {args.db} "
+          f"({args.universe} universe)")
     print("note: this is SIMULATED data for validating the pipeline, not a real market.")
     return 0
 
@@ -264,6 +267,55 @@ def cmd_auctions_index(args: argparse.Namespace) -> int:
     return 0
 
 
+def _ebay_client(args: argparse.Namespace) -> _ebay.Client | None:
+    client_id = args.client_id or os.environ.get("EBAY_CLIENT_ID")
+    client_secret = args.client_secret or os.environ.get("EBAY_CLIENT_SECRET")
+    if not client_id or not client_secret:
+        print(
+            "no eBay credentials: pass --client-id/--client-secret or set "
+            "EBAY_CLIENT_ID/EBAY_CLIENT_SECRET. Never commit them to the repo.", file=sys.stderr,
+        )
+        return None
+    cache_dir = args.cache_dir or os.path.join(os.path.dirname(args.db) or ".", ".ebay_cache")
+    return _ebay.Client(
+        client_id=client_id, client_secret=client_secret,
+        marketplace_id=args.marketplace, cache_dir=cache_dir,
+    )
+
+
+def cmd_ebay_ingest(args: argparse.Namespace) -> int:
+    """Search eBay's Browse API for a watchlist and ingest results directly.
+
+    No calibrate step: this is a real REST API returning structured JSON, not
+    scraped HTML with guessed selectors, so there is nothing to calibrate.
+    """
+    client = _ebay_client(args)
+    if client is None:
+        return 1
+
+    if args.file:
+        with open(args.file, encoding="utf-8") as handle:
+            queries = [line.strip() for line in handle if line.strip() and not line.startswith("#")]
+    else:
+        queries = args.query
+
+    try:
+        raw = _ebay.search_watchlist(client, queries, limit=args.limit, filter=args.filter)
+    except _ebay.EbayError as exc:
+        print(f"eBay error: {exc}", file=sys.stderr)
+        return 1
+
+    if not raw:
+        print("no listings found for this watchlist", file=sys.stderr)
+        return 1
+
+    observed = args.date or _dt.date.today().isoformat()
+    with db.session(args.db) as conn:
+        ingest_report = ingest.upsert_listings(conn, raw, observed_at=observed, source="ebay")
+    print(ingest_report.summary())
+    return 0
+
+
 def cmd_index(args: argparse.Namespace) -> int:
     with db.session(args.db) as conn:
         rows = ingest.hedonic_rows(conn, reference=args.reference, brand=args.brand)
@@ -321,6 +373,118 @@ def _fmt(value, places: int) -> str:
     return "-" if value is None else f"{value:.{places}f}"
 
 
+def cmd_report(args: argparse.Namespace) -> int:
+    """Rank a watchlist of references by net-of-cost hedonic return."""
+    if args.file:
+        with open(args.file, encoding="utf-8") as handle:
+            references = [line.strip() for line in handle if line.strip() and not line.startswith("#")]
+    else:
+        references = args.reference
+
+    # metrics.CostModel's default shipping_insurance_eur=250 is calibrated for
+    # watches worth thousands: against a sub-1000 watch, EUR500 round-trip
+    # shipping/insurance alone can exceed the item's value, clipping every net
+    # CAGR to the -100% floor and making the ranking meaningless. --shipping-
+    # insurance-eur lets a cheap-watch report use a realistic figure instead.
+    costs = metrics.CostModel(shipping_insurance_eur=args.shipping_insurance_eur)
+    with db.session(args.db) as conn:
+        ranked = report.rank_references(
+            conn, references, max_price_eur=args.max_price_eur, min_obs=args.min_obs, costs=costs,
+        )
+    top, bottom = report.top_bottom(ranked, n=args.top)
+    skipped = [r for r in ranked if r.net_cagr is None]
+
+    ceiling_text = f" (ceiling EUR {args.max_price_eur:,.0f})" if args.max_price_eur else ""
+    print(f"{len(ranked) - len(skipped)}/{len(ranked)} references indexed{ceiling_text}")
+
+    def _table(title: str, rows: list) -> None:
+        print(f"\n{title}")
+        header = f"{'reference':<24}{'brand':<14}{'net CAGR':>10}{'gross':>9}{'n':>6}   median ask"
+        print(header)
+        print("-" * len(header))
+        for r in rows:
+            ask = f"EUR {r.median_ask_eur:,.0f}" if r.median_ask_eur else "-"
+            print(
+                f"{r.reference:<24}{(r.brand or '-'):<14}"
+                f"{r.net_cagr:>+10.1%}{r.gross_cagr:>+9.1%}{r.n_obs:>6}   {ask}"
+            )
+
+    if top:
+        _table(f"TOP {len(top)} (best net-of-cost return)", top)
+    if bottom:
+        _table(f"BOTTOM {len(bottom)} (worst net-of-cost return)", bottom)
+    if not top and not bottom:
+        print("\nnothing indexed -- every reference was skipped, see below")
+
+    if skipped:
+        print(f"\n{len(skipped)} skipped:")
+        for r in skipped:
+            print(f"  {r.reference:<24}{r.skip_reason}")
+
+    print(
+        "\nNet-of-cost, quality-adjusted return over each reference's own observed window -- "
+        "not a forecast. A small watchlist makes this noisy; treat direction, not precision, "
+        "as the signal."
+    )
+    return 0
+
+
+def cmd_genetic_run(args: argparse.Namespace) -> int:
+    """Evolve a scoring-weight vector, walk-forward validated, vs buy-and-hold.
+
+    See watchlab/genetic.py's module docstring before trusting the output --
+    this is a small-sample estimate over a watchlist-sized universe, and
+    buy-and-hold is expected to win more often than not.
+    """
+    if args.file:
+        with open(args.file, encoding="utf-8") as handle:
+            references = [line.strip() for line in handle if line.strip() and not line.startswith("#")]
+    else:
+        references = args.reference
+
+    # See cmd_report's identical comment: metrics.CostModel's 250EUR-per-leg
+    # default assumes a watch worth thousands. Left at that default, every
+    # sub-1000EUR position nets to the same -100% floor and the GA has
+    # nothing to differentiate on.
+    costs = metrics.CostModel(shipping_insurance_eur=args.shipping_insurance_eur)
+    with db.session(args.db) as conn:
+        result = genetic.run_ga(
+            conn, references, population_size=args.population, generations=args.generations,
+            top_k=args.top_k, checkpoint_every_months=args.checkpoint_months,
+            horizon_months=args.horizon_months, complexity_penalty=args.complexity_penalty,
+            seed=args.seed, costs=costs,
+        )
+
+    print(f"{result.n_train_checkpoints} train checkpoints, {result.n_test_checkpoints} test "
+          f"checkpoints, top-{result.top_k} of {len(references)} references, "
+          f"{args.horizon_months}-month horizon")
+    if result.n_train_checkpoints == 0:
+        print("not enough history to build even one checkpoint -- see build_checkpoints' "
+              "12-observation-per-reference floor", file=sys.stderr)
+        return 1
+
+    print("\nevolved weights (feature -> signed weight; sign is what the GA learned, not assumed):")
+    for name, weight in result.best_weights.items():
+        print(f"  {name:<16}{weight:+.3f}")
+
+    print(f"\ntrain net CAGR-equivalent (in-sample, for reference only): "
+          f"{_fmt_pct(result.train_net_return)}")
+    print(f"test net return, GA-selected top-{result.top_k}  (out-of-sample): "
+          f"{_fmt_pct(result.test_net_return)}")
+    print(f"test net return, equal-weight buy-and-hold (out-of-sample): "
+          f"{_fmt_pct(result.test_buy_and_hold_net_return)}")
+    if result.test_net_return is not None and result.test_buy_and_hold_net_return is not None:
+        winner = "GA screen" if result.test_net_return > result.test_buy_and_hold_net_return else "buy-and-hold"
+        print(f"\n{winner} wins on this run -- on {result.n_test_checkpoints} test checkpoint(s), "
+              "which is not enough to generalise. This is a screen to point judgement at, "
+              "never a return forecast.")
+    return 0
+
+
+def _fmt_pct(value: float | None) -> str:
+    return "-" if value is None else f"{value:+.1%}"
+
+
 def cmd_serve(args: argparse.Namespace) -> int:
     from . import server
 
@@ -341,6 +505,10 @@ def build_parser() -> argparse.ArgumentParser:
     demo = subparsers.add_parser("demo", help="populate a simulated market")
     demo.add_argument("--days", type=int, default=730)
     demo.add_argument("--seed", type=int, default=20260812)
+    demo.add_argument(
+        "--universe", choices=["default", "budget"], default="default",
+        help="'default' = luxury validation set, 'budget' = everyday sub-EUR1000 watches",
+    )
     demo.set_defaults(func=cmd_demo)
 
     calibrate = subparsers.add_parser(
@@ -443,6 +611,32 @@ def build_parser() -> argparse.ArgumentParser:
     )
     auctions_index.set_defaults(func=cmd_auctions_index)
 
+    def _ebay_credential_args(p):
+        p.add_argument("--client-id", help="eBay application client id (default: $EBAY_CLIENT_ID)")
+        p.add_argument("--client-secret", help="eBay application client secret (default: $EBAY_CLIENT_SECRET)")
+        p.add_argument("--cache-dir", help="response cache dir (default: <db dir>/.ebay_cache)")
+        p.add_argument(
+            "--marketplace", default="EBAY_GB",
+            help="eBay marketplace id, sets both currency and site searched (default: EBAY_GB)",
+        )
+
+    ebay_cmd = subparsers.add_parser("ebay", help="search eBay's Browse API and ingest results")
+    ebay_sub = ebay_cmd.add_subparsers(dest="ebay_command", required=True)
+
+    ebay_ingest = ebay_sub.add_parser(
+        "ingest", help="search a watchlist via item_summary/search and ingest the results"
+    )
+    ebay_ref_group = ebay_ingest.add_mutually_exclusive_group(required=True)
+    ebay_ref_group.add_argument("--query", nargs="+", help="search query strings, e.g. 'Seiko SRPD55K1'")
+    ebay_ref_group.add_argument("--file", help="text file, one search query per line ('#' comments ok)")
+    ebay_ingest.add_argument("--date", help="observation date (default: today)")
+    ebay_ingest.add_argument("--limit", type=int, default=50, help="results per query (max 200)")
+    ebay_ingest.add_argument(
+        "--filter", help="Browse API filter string, e.g. 'buyingOptions:{FIXED_PRICE}'"
+    )
+    _ebay_credential_args(ebay_ingest)
+    ebay_ingest.set_defaults(func=cmd_ebay_ingest)
+
     index_cmd = subparsers.add_parser("index", help="print a hedonic index")
     index_cmd.add_argument("--reference")
     index_cmd.add_argument("--brand")
@@ -454,6 +648,50 @@ def build_parser() -> argparse.ArgumentParser:
     screen_cmd.add_argument("--limit", type=int, default=30)
     screen_cmd.add_argument("--json", action="store_true")
     screen_cmd.set_defaults(func=cmd_screen)
+
+    genetic_cmd = subparsers.add_parser(
+        "genetic", help="GA-tuned reference screen, walk-forward validated vs buy-and-hold"
+    )
+    genetic_sub = genetic_cmd.add_subparsers(dest="genetic_command", required=True)
+    genetic_run = genetic_sub.add_parser(
+        "run", help="evolve a scoring weight vector and report it against buy-and-hold"
+    )
+    genetic_ref_group = genetic_run.add_mutually_exclusive_group(required=True)
+    genetic_ref_group.add_argument("--reference", nargs="+", help="reference numbers to include")
+    genetic_ref_group.add_argument("--file", help="text file, one reference per line ('#' comments ok)")
+    genetic_run.add_argument("--top-k", type=int, default=3, help="how many references the GA screen selects")
+    genetic_run.add_argument("--population", type=int, default=40)
+    genetic_run.add_argument("--generations", type=int, default=30)
+    genetic_run.add_argument("--checkpoint-months", type=int, default=3)
+    genetic_run.add_argument("--horizon-months", type=int, default=6)
+    genetic_run.add_argument(
+        "--complexity-penalty", type=float, default=0.02,
+        help="L1 penalty on the weight vector; higher prefers fewer/smaller weights",
+    )
+    genetic_run.add_argument("--seed", type=int, help="fixed seed for a reproducible run")
+    genetic_run.add_argument(
+        "--shipping-insurance-eur", type=float, default=30.0,
+        help="round-trip shipping+insurance per leg; default (30) suits sub-1000EUR watches",
+    )
+    genetic_run.set_defaults(func=cmd_genetic_run)
+
+    report_cmd = subparsers.add_parser(
+        "report", help="rank a watchlist of references by net-of-cost hedonic return"
+    )
+    report_ref_group = report_cmd.add_mutually_exclusive_group(required=True)
+    report_ref_group.add_argument("--reference", nargs="+", help="reference numbers to include")
+    report_ref_group.add_argument("--file", help="text file, one reference per line ('#' comments ok)")
+    report_cmd.add_argument(
+        "--max-price-eur", type=float, help="drop references whose median ask exceeds this"
+    )
+    report_cmd.add_argument("--min-obs", type=int, default=12)
+    report_cmd.add_argument("--top", type=int, default=10)
+    report_cmd.add_argument(
+        "--shipping-insurance-eur", type=float, default=30.0,
+        help="round-trip shipping+insurance per leg; default (30) suits sub-1000EUR watches, "
+             "raise it for a luxury watchlist (metrics.CostModel's own default is 250)",
+    )
+    report_cmd.set_defaults(func=cmd_report)
 
     serve_cmd = subparsers.add_parser("serve", help="run the local dashboard")
     serve_cmd.add_argument("--host", default="127.0.0.1")

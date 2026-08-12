@@ -341,13 +341,13 @@ def annualised_return(points: Iterable[IndexPoint]) -> float | None:
     if len(ordered) < 2:
         return None
     first, last = ordered[0], ordered[-1]
-    months = _month_diff(first.period, last.period)
+    months = month_diff(first.period, last.period)
     if months <= 0 or first.value <= 0:
         return None
     return (last.value / first.value) ** (12.0 / months) - 1.0
 
 
-def _month_diff(a: str, b: str) -> int:
+def month_diff(a: str, b: str) -> int:
     ya, ma = int(a[:4]), int(a[5:7])
     yb, mb = int(b[:4]), int(b[5:7])
     return (yb - ya) * 12 + (mb - ma)
