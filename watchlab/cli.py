@@ -8,7 +8,7 @@ import json
 import os
 import sys
 
-from . import db, hedonic, ingest, metrics
+from . import catalogue, db, hedonic, ingest, metrics
 from .sources import chrono24, synthetic
 
 
@@ -69,6 +69,29 @@ def cmd_ingest(args: argparse.Namespace) -> int:
         print("(no delisting pass: use --complete-crawl only when the crawl covered "
               "everything you track, or days-on-market will be corrupted)")
     return 0
+
+
+def cmd_catalogue_import(args: argparse.Namespace) -> int:
+    """Load reference-catalogue records (JSON or CSV) into refs/ref_aliases.
+
+    See watchlab/catalogue.py for the expected record shape. This is provider
+    agnostic: point it at a file in that shape, regardless of where the file
+    came from.
+    """
+    try:
+        records = catalogue.load_file(args.file)
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        print(f"could not read {args.file}: {exc}", file=sys.stderr)
+        return 1
+
+    with db.session(args.db) as conn:
+        report = catalogue.upsert_catalogue(conn, records)
+    print(report.summary())
+    for error in report.errors[:20]:
+        print(f"  ! {error}", file=sys.stderr)
+    if len(report.errors) > 20:
+        print(f"  ... and {len(report.errors) - 20} more errors", file=sys.stderr)
+    return 1 if report.errors and report.refs_inserted == 0 and report.refs_updated == 0 else 0
 
 
 def cmd_index(args: argparse.Namespace) -> int:
@@ -165,6 +188,16 @@ def build_parser() -> argparse.ArgumentParser:
         help="mark unseen live listings as delisted; only safe on a full crawl",
     )
     ingest_cmd.set_defaults(func=cmd_ingest)
+
+    catalogue_cmd = subparsers.add_parser(
+        "catalogue", help="manage the reference catalogue (refs / ref_aliases)"
+    )
+    catalogue_sub = catalogue_cmd.add_subparsers(dest="catalogue_command", required=True)
+    catalogue_import = catalogue_sub.add_parser(
+        "import", help="load a JSON or CSV file of reference records"
+    )
+    catalogue_import.add_argument("file")
+    catalogue_import.set_defaults(func=cmd_catalogue_import)
 
     index_cmd = subparsers.add_parser("index", help="print a hedonic index")
     index_cmd.add_argument("--reference")
