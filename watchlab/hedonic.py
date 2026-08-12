@@ -316,6 +316,25 @@ def standard_features() -> list[Feature]:
     ]
 
 
+def auction_features() -> list[Feature]:
+    """Quality controls for auction transaction data.
+
+    Same shape as :func:`standard_features` but swaps seller_country/
+    seller_type for ``house``: which room a lot sells through is a real,
+    documented effect on hammer price (venue prestige and buyer pool differ
+    between a flagship Geneva sale and a regional saleroom), and holding it
+    constant is the auction equivalent of holding seller_country constant for
+    marketplace listings.
+    """
+    return [
+        Feature("condition", "categorical", base_level="very_good"),
+        Feature("has_papers", "categorical"),
+        Feature("has_box", "categorical"),
+        Feature("house", "categorical"),
+        Feature("age_years", "numeric", getter=lambda r: r.get("age_years") or 0.0),
+    ]
+
+
 def annualised_return(points: Iterable[IndexPoint]) -> float | None:
     """CAGR implied by the first and last index points, assuming monthly periods."""
     ordered = sorted(points, key=lambda p: p.period)

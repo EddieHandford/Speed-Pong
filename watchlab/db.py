@@ -72,6 +72,7 @@ CREATE TABLE IF NOT EXISTS auction_results (
     house           TEXT NOT NULL,
     sale_date       TEXT NOT NULL,
     lot_url         TEXT,
+    lot_number      TEXT,
     raw_title       TEXT NOT NULL,
     brand           TEXT,
     model           TEXT,
@@ -80,8 +81,10 @@ CREATE TABLE IF NOT EXISTS auction_results (
     condition       TEXT,
     has_box         INTEGER,
     has_papers      INTEGER,
-    total_cents     INTEGER NOT NULL,     -- hammer + buyer's premium
-    currency        TEXT NOT NULL
+    total_cents     INTEGER NOT NULL,     -- price realised: hammer + buyer's premium
+    currency        TEXT NOT NULL,
+    estimate_low_cents  INTEGER,          -- pre-sale low estimate, same currency
+    estimate_high_cents INTEGER
 );
 
 CREATE INDEX IF NOT EXISTS idx_auction_reference ON auction_results(reference);

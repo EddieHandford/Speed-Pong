@@ -96,6 +96,46 @@ A rising ask index *alongside* rising supply, rising days-on-market and a
 rising cut rate is a market topping out, not a market appreciating. Making
 that combination visible is the point of the table.
 
+### The transaction-based index (`auctions.py`)
+
+Everything above is asks. `auction_results` is the one table with transaction
+truth in it — a "price realised" is what a real buyer actually paid, on a
+known date. `auction_hedonic_rows()` feeds this straight into the same
+`hedonic.time_dummy_index()` machinery used for listings, with
+`hedonic.auction_features()` swapping in `house` as a quality control (which
+room a lot sells through has a real, documented effect on hammer price)
+instead of seller country/type.
+
+```bash
+python3 -m watchlab auctions import lots.json      # the path to prefer
+python3 -m watchlab auctions index --reference 126610LN
+```
+
+Auction volume is much lower than listing volume — a reference might see a
+few dozen sales a year across every house combined, not thousands of
+listings a month — which changes two things about the estimation, both
+handled by default rather than left as a footgun:
+
+- **Periods are quarterly, not monthly** (`period_months=3` by default in
+  `auction_hedonic_rows`), because monthly bins on auction-scale volume run
+  out of observations per period fast enough to make the regression
+  under-determined.
+- **Ridge is higher** (`DEFAULT_AUCTION_RIDGE = 0.02` vs the near-zero
+  default): fewer observations per parameter means individual coefficients
+  are noisier even though they're unbiased, and a moderate ridge trades a
+  little bias for a real reduction in that variance. Checked empirically
+  across the synthetic universe and several seeds, not picked to fit one case.
+
+**What this table does *not* let you claim:** that a transaction-based index
+always beats an ask-based one. It's less *biased* (no seller markup, no
+listing staleness), but it's also noisier from lower volume, and in a
+small-sample regime lower bias doesn't guarantee lower error against the
+truth — checked in `tests/test_auctions.py` across several synthetic seeds,
+auctions beat listings on RMSE only about half the time. The reliable,
+reproducible result is the one auctions and listings both make separately:
+hedonic beats naive-median-of-the-same-data, because the composition-drift
+problem is real in auction lot mix too, not just in Chrono24 listings.
+
 ## Getting real data in
 
 `sources/chrono24.py` is written but **unverified** — it was built without
@@ -123,15 +163,33 @@ delisted. On a partial crawl that silently corrupts every days-on-market
 number in the database. Only pass it when the crawl genuinely covered
 everything you track.
 
-### Better sources than Chrono24
+### Auction results (`sources/auction_houses.py`, `auctions.py`)
 
 For anything involving *history* or *actual clearing prices*, auction results
 beat listings outright: Phillips, Christie's, Sotheby's, Bonhams and
 Antiquorum publish dated, itemised, genuinely-sold prices going back years,
-publicly, with far cleaner legal footing. The `auction_results` table is in
-the schema and waiting for an ingester. That is the right next thing to build
-— and the only way to backtest anything before you have collected two years
-of listings yourself.
+publicly, and have every incentive to keep doing so — publishing results is
+core to how they attract future consignments. Four independent houses means
+no single point of failure the way a scraper aimed at one marketplace has.
+
+Two ways in, same split as the reference catalogue:
+
+```bash
+# prefer this: a documented JSON/CSV shape, works with anything you can get
+# as structured data -- a research export, a hand-compiled spreadsheet
+python3 -m watchlab auctions import lots.json
+
+# saved-page HTML parsing, unverified against live pages (no network access
+# to any auction house from this sandbox) -- and weaker evidence here than
+# it was for Chrono24: schema.org's Offer type models something currently
+# for sale, a poor semantic fit for a lot that has already closed
+python3 -m watchlab auctions calibrate "Phillips" saved/*.html
+python3 -m watchlab auctions ingest "Phillips" saved/*.html
+```
+
+Fields explicitly supplied in an import always win over what
+`normalize.parse_title` infers from the lot title — an auction house's own
+condition report is more authoritative than a regex guess.
 
 ### thewatchapi.com (`sources/thewatchapi.py`)
 
@@ -171,6 +229,7 @@ watchlab/
   db.py                schema, connection, FX conversion
   normalize.py         title -> canonical record
   catalogue.py         provider-agnostic reference-catalogue importer
+  auctions.py          provider-agnostic auction-lot importer + transaction index rows
   hedonic.py           OLS/ridge, time-dummy index (no numpy)
   metrics.py           microstructure metrics, cost model
   ingest.py            raw listings -> normalised rows, lifecycle
@@ -179,14 +238,17 @@ watchlab/
   web/dashboard.html   the dashboard
   sources/
     chrono24.py        listing scraper (UNVERIFIED selectors -- no live access)
+    auction_houses.py  auction lot HTML parser (UNVERIFIED -- no live access)
     thewatchapi.py      catalogue + price-history client (verified vs real docs)
-    synthetic.py         simulated market with a known true path
-tests/                 98 tests
+    synthetic.py         simulated market + auction sales, both with a known true path
+tests/                 123 tests
 ```
 
 ## Not built yet
 
-- Auction-results ingester (the real historical dataset)
+- Dashboard wiring for the transaction-based index (currently CLI-only via
+  `auctions index`) — showing it side by side with the ask-based index per
+  reference is the natural next increment.
 - The genetic algorithm. Deliberately last. A GA over a few thousand noisy
   observations is an extremely efficient way to find a rule that fits the
   past perfectly and predicts nothing. If it gets built, it needs walk-forward
