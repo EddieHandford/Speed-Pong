@@ -14,7 +14,7 @@ import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
-from . import db, hedonic, ingest, metrics
+from . import auctions, db, hedonic, ingest, metrics
 
 WEB_DIR = os.path.join(os.path.dirname(__file__), "web")
 
@@ -74,6 +74,66 @@ def _index_payload(conn, reference: str) -> dict[str, Any]:
             column.split("=", 1)[1]: round(fit.coefficients[i], 4)
             for i, column in enumerate(fit.columns) if column.startswith("condition=")
         },
+    }
+
+
+def _auction_index_payload(conn, reference: str) -> dict[str, Any]:
+    """Transaction-based index for one reference, alongside the naive median it corrects.
+
+    Deliberately NOT merged into ``_index_payload``: auction periods are
+    quarterly by default (auction volume is far lower than listing volume)
+    while the ask-based index is monthly, and the two series come from
+    different underlying data with different biases. Keeping them as
+    separate payloads (and separate chart panels in the dashboard) avoids
+    implying a period-by-period comparability that isn't there -- see
+    auctions.py's module docstring and tests/test_auctions.py for why
+    "transactions beat asks" is not a claim this project makes.
+    """
+    rows = auctions.auction_hedonic_rows(conn, reference=reference)
+    if len(rows) < 12:
+        return {"reference": reference, "error": "not enough transactions", "points": []}
+
+    try:
+        points, fit = hedonic.time_dummy_index(
+            rows, hedonic.auction_features(), ridge=auctions.DEFAULT_AUCTION_RIDGE
+        )
+    except (ValueError, hedonic.SingularMatrixError) as exc:
+        return {"reference": reference, "error": str(exc), "points": []}
+
+    by_period: dict[str, list[float]] = {}
+    houses: set[str] = set()
+    for row in rows:
+        by_period.setdefault(row["period"], []).append(row["price"])
+        if row.get("house"):
+            houses.add(row["house"])
+
+    periods = [p.period for p in points]
+    base_median = statistics.median(by_period[periods[0]]) if periods else None
+
+    series = []
+    for point in points:
+        naive = None
+        if base_median and point.period in by_period:
+            naive = 100.0 * statistics.median(by_period[point.period]) / base_median
+        series.append(
+            {
+                "period": point.period,
+                "hedonic": round(point.value, 2),
+                "naive": round(naive, 2) if naive is not None else None,
+                "n": point.n_obs,
+                "ci_low": round(point.ci_low, 2) if point.ci_low else None,
+                "ci_high": round(point.ci_high, 2) if point.ci_high else None,
+            }
+        )
+
+    cagr = hedonic.annualised_return(points)
+    return {
+        "reference": reference,
+        "points": series,
+        "r_squared": round(fit.r_squared, 3),
+        "n_obs": fit.n_obs,
+        "n_houses": len(houses),
+        "cagr": round(cagr, 4) if cagr is not None else None,
     }
 
 
@@ -138,6 +198,12 @@ class Handler(BaseHTTPRequestHandler):
                     self._send({"error": "reference is required"}, status=400)
                     return
                 self._send(_index_payload(conn, reference))
+            elif parsed.path == "/api/auction-index":
+                reference = query.get("reference", [None])[0]
+                if not reference:
+                    self._send({"error": "reference is required"}, status=400)
+                    return
+                self._send(_auction_index_payload(conn, reference))
             else:
                 self.send_error(404)
 

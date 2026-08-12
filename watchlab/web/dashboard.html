@@ -15,6 +15,7 @@
     --text-muted:     #78766f;
     --series-1: #2a78d6;
     --series-2: #eb6834;
+    --series-3: #1baf7a;
     --good: #008300;
     --bad:  #e34948;
     --grid: #ebeae5;
@@ -30,6 +31,7 @@
       --text-muted:     #8d8b81;
       --series-1: #3987e5;
       --series-2: #d95926;
+      --series-3: #199e70;
       --good: #46a44a;
       --bad:  #e66767;
       --grid: #262523;
@@ -45,6 +47,7 @@
     --text-muted:     #8d8b81;
     --series-1: #3987e5;
     --series-2: #d95926;
+    --series-3: #199e70;
     --good: #46a44a;
     --bad:  #e66767;
     --grid: #262523;
@@ -157,6 +160,24 @@
   </section>
 
   <section class="card">
+    <h2>Transaction-based index (auctions)</h2>
+    <p class="note">
+      Same hedonic-vs-naive comparison, but on realised auction prices instead of asks &mdash;
+      the one number here that reflects what a buyer actually paid. Quarterly periods: auction
+      volume for one reference is a fraction of listing volume, so monthly bins would be too
+      thin to estimate reliably.
+    </p>
+    <div class="stats" id="auction-stats"></div>
+    <div class="legend" id="auction-legend">
+      <span><i class="swatch" style="background:var(--series-3)"></i> Hedonic (transactions)</span>
+      <span><i class="swatch" style="background:var(--series-2)"></i> Naive median (transactions)</span>
+    </div>
+    <div class="chart-scroll"><svg id="auction-chart" width="1100" height="330" role="img"
+      aria-label="Transaction-based price index over time"></svg></div>
+    <p class="note" id="compare-note" style="margin-top:12px;"></p>
+  </section>
+
+  <section class="card">
     <h2>Supply-side screen</h2>
     <p class="note">
       Ranked by a composite of days-on-market, price-cut rate, ask dispersion and churn.
@@ -212,32 +233,64 @@ async function loadIndex(reference) {
   document.getElementById('ref').value = reference;
   document.querySelectorAll('#screen tbody tr').forEach(tr =>
     tr.classList.toggle('sel', tr.dataset.ref === reference));
-  const data = await (await fetch('/api/index?reference=' + encodeURIComponent(reference))).json();
+
+  const [data, auctionData] = await Promise.all([
+    fetch('/api/index?reference=' + encodeURIComponent(reference)).then(r => r.json()),
+    fetch('/api/auction-index?reference=' + encodeURIComponent(reference)).then(r => r.json()),
+  ]);
   current = data;
   renderStats(data);
-  renderChart(data);
+  renderChart(data, 'chart', 'var(--series-1)', 'hedonic');
+  renderAuctionStats(auctionData);
+  renderChart(auctionData, 'auction-chart', 'var(--series-3)', 'hedonic');
+  renderCompareNote(data, auctionData);
+}
+
+function statTile(label, value, cls, hint) {
+  return `<div class="stat"><div class="label">${label}</div>
+     <div class="value ${cls || ''}">${value}</div>
+     <div class="hint">${hint || ''}</div></div>`;
 }
 
 function renderStats(d) {
   const el = document.getElementById('stats');
   if (d.error || !d.points.length) { el.innerHTML = `<div class="stat muted">${d.error || 'no data'}</div>`; return; }
   const net = d.net_cagr;
-  const stat = (label, value, cls, hint) =>
-    `<div class="stat"><div class="label">${label}</div>
-     <div class="value ${cls || ''}">${value}</div>
-     <div class="hint">${hint || ''}</div></div>`;
   el.innerHTML = [
-    stat('Gross CAGR', fmtPct(d.cagr), d.cagr > 0 ? 'pos' : 'neg', 'quality-adjusted ask'),
-    stat('Cost hurdle', fmtPct(d.hurdle_1y), '', 'break-even over 1 year'),
-    stat('Net of costs', fmtPct(net), net > 0 ? 'pos' : 'neg', 'after round-trip friction'),
-    stat('Papers premium', d.papers_premium == null ? '—' : fmtPct(Math.exp(d.papers_premium) - 1),
+    statTile('Gross CAGR', fmtPct(d.cagr), d.cagr > 0 ? 'pos' : 'neg', 'quality-adjusted ask'),
+    statTile('Cost hurdle', fmtPct(d.hurdle_1y), '', 'break-even over 1 year'),
+    statTile('Net of costs', fmtPct(net), net > 0 ? 'pos' : 'neg', 'after round-trip friction'),
+    statTile('Papers premium', d.papers_premium == null ? '—' : fmtPct(Math.exp(d.papers_premium) - 1),
          '', 'estimated from the model'),
-    stat('Fit', 'R² ' + fmtNum(d.r_squared, 2), '', d.n_obs + ' fresh listings')
+    statTile('Fit', 'R² ' + fmtNum(d.r_squared, 2), '', d.n_obs + ' fresh listings')
   ].join('');
 }
 
-function renderChart(d) {
-  const svg = document.getElementById('chart');
+function renderAuctionStats(d) {
+  const el = document.getElementById('auction-stats');
+  if (d.error || !d.points.length) { el.innerHTML = `<div class="stat muted">${d.error || 'no data'}</div>`; return; }
+  el.innerHTML = [
+    statTile('Gross CAGR', fmtPct(d.cagr), d.cagr > 0 ? 'pos' : 'neg', 'realised transactions'),
+    statTile('Fit', 'R² ' + fmtNum(d.r_squared, 2), '', d.n_obs + ' sales'),
+    statTile('Houses', d.n_houses ?? '—', '', 'distinct auction houses'),
+  ].join('');
+}
+
+function renderCompareNote(askData, auctionData) {
+  const el = document.getElementById('compare-note');
+  if (askData.error || auctionData.error || askData.cagr == null || auctionData.cagr == null) {
+    el.textContent = '';
+    return;
+  }
+  el.innerHTML = `<strong>Ask-based CAGR ${fmtPct(askData.cagr)}</strong> vs ` +
+    `<strong>transaction-based CAGR ${fmtPct(auctionData.cagr)}</strong> for the same reference. ` +
+    `These come from different data, different volumes, and different granularity (monthly vs ` +
+    `quarterly) &mdash; not a fair race. The transaction number carries less bias; the ask number ` +
+    `usually carries more observations. Neither one alone is the answer.`;
+}
+
+function renderChart(d, svgId, primaryColor, primaryLabel) {
+  const svg = document.getElementById(svgId);
   svg.innerHTML = '';
   if (d.error || d.points.length < 2) return;
 
@@ -286,7 +339,7 @@ function renderChart(d) {
   if (band.length === pts.length) {
     const up = pts.map((p, i) => `${x(i)},${y(p.ci_high)}`).join(' ');
     const down = pts.map((p, i) => `${x(i)},${y(p.ci_low)}`).reverse().join(' ');
-    add('polygon', { points: up + ' ' + down, fill: 'var(--series-1)', opacity: 0.11 });
+    add('polygon', { points: up + ' ' + down, fill: primaryColor, opacity: 0.11 });
   }
 
   const line = (key, colour, dash) => {
@@ -300,7 +353,7 @@ function renderChart(d) {
   };
 
   const lastN = line('naive', 'var(--series-2)', '5 4');
-  const lastH = line('hedonic', 'var(--series-1)');
+  const lastH = line('hedonic', primaryColor);
 
   // Direct labels at the line ends: identity never rests on colour alone.
   const endLabel = (last, colour, text) => {
@@ -308,13 +361,13 @@ function renderChart(d) {
     add('text', { x: x(last[0]) + 8, y: y(last[1]) + 4, fill: colour,
                   'font-size': 12, 'font-weight': 600 }).textContent = text;
   };
-  endLabel(lastH, 'var(--series-1)', 'hedonic');
+  endLabel(lastH, primaryColor, primaryLabel);
   endLabel(lastN, 'var(--series-2)', 'naive');
 
   // Crosshair + tooltip layer.
   const rule = add('line', { x1: 0, x2: 0, y1: T, y2: T + ih, stroke: 'var(--text-muted)',
                              'stroke-width': 1, opacity: 0 });
-  const dotH = add('circle', { r: 4.5, fill: 'var(--series-1)', stroke: 'var(--surface-1)',
+  const dotH = add('circle', { r: 4.5, fill: primaryColor, stroke: 'var(--surface-1)',
                                'stroke-width': 2, opacity: 0 });
   const dotN = add('circle', { r: 4.5, fill: 'var(--series-2)', stroke: 'var(--surface-1)',
                                'stroke-width': 2, opacity: 0 });

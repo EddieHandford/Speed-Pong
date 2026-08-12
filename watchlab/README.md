@@ -111,6 +111,13 @@ python3 -m watchlab auctions import lots.json      # the path to prefer
 python3 -m watchlab auctions index --reference 126610LN
 ```
 
+The dashboard shows this alongside the ask-based index for the same
+reference, in its own panel with its own chart, not merged into one --
+different period width, different bias profile, different volume, and
+merging them would visually imply a comparability that isn't there. A short
+compare line under the panel states both CAGRs side by side with that same
+caveat, rather than picking a winner.
+
 Auction volume is much lower than listing volume — a reference might see a
 few dozen sales a year across every house combined, not thousands of
 listings a month — which changes two things about the estimation, both
@@ -246,9 +253,6 @@ tests/                 123 tests
 
 ## Not built yet
 
-- Dashboard wiring for the transaction-based index (currently CLI-only via
-  `auctions index`) — showing it side by side with the ask-based index per
-  reference is the natural next increment.
 - The genetic algorithm. Deliberately last. A GA over a few thousand noisy
   observations is an extremely efficient way to find a rule that fits the
   past perfectly and predicts nothing. If it gets built, it needs walk-forward
