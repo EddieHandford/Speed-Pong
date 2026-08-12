@@ -1,0 +1,392 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>watchlab</title>
+<style>
+  :root {
+    color-scheme: light;
+    --surface-0: #f4f4f2;
+    --surface-1: #fcfcfb;
+    --border:    #e0dfda;
+    --text-primary:   #0b0b0b;
+    --text-secondary: #52514e;
+    --text-muted:     #78766f;
+    --series-1: #2a78d6;
+    --series-2: #eb6834;
+    --good: #008300;
+    --bad:  #e34948;
+    --grid: #ebeae5;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
+      --surface-0: #121211;
+      --surface-1: #1a1a19;
+      --border:    #33322e;
+      --text-primary:   #ffffff;
+      --text-secondary: #c3c2b7;
+      --text-muted:     #8d8b81;
+      --series-1: #3987e5;
+      --series-2: #d95926;
+      --good: #46a44a;
+      --bad:  #e66767;
+      --grid: #262523;
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --surface-0: #121211;
+    --surface-1: #1a1a19;
+    --border:    #33322e;
+    --text-primary:   #ffffff;
+    --text-secondary: #c3c2b7;
+    --text-muted:     #8d8b81;
+    --series-1: #3987e5;
+    --series-2: #d95926;
+    --good: #46a44a;
+    --bad:  #e66767;
+    --grid: #262523;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--surface-0); color: var(--text-primary);
+    font: 14px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  .wrap { max-width: 1180px; margin: 0 auto; padding: 28px 20px 64px; }
+  header { margin-bottom: 8px; }
+  h1 { font-size: 20px; margin: 0 0 4px; letter-spacing: -0.01em; }
+  .sub { color: var(--text-secondary); margin: 0 0 20px; max-width: 68ch; }
+  .caveat {
+    background: var(--surface-1); border: 1px solid var(--border);
+    border-left: 3px solid var(--series-2);
+    padding: 12px 14px; border-radius: 6px; margin: 0 0 24px;
+    color: var(--text-secondary); font-size: 13px; max-width: 78ch;
+  }
+  .caveat strong { color: var(--text-primary); }
+  .card {
+    background: var(--surface-1); border: 1px solid var(--border);
+    border-radius: 8px; padding: 18px; margin-bottom: 22px;
+  }
+  .card h2 { font-size: 14px; margin: 0 0 2px; letter-spacing: -0.005em; }
+  .card .note { color: var(--text-muted); font-size: 12px; margin: 0 0 16px; }
+  .controls { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-bottom: 16px; }
+  select, button {
+    font: inherit; padding: 6px 10px; border-radius: 6px;
+    border: 1px solid var(--border); background: var(--surface-1); color: var(--text-primary);
+  }
+  button { cursor: pointer; }
+
+  .stats { display: flex; flex-wrap: wrap; gap: 28px; margin-bottom: 18px; }
+  .stat .label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-muted); }
+  .stat .value { font-size: 26px; font-variant-numeric: tabular-nums; letter-spacing: -0.02em; }
+  .stat .value.pos { color: var(--good); }
+  .stat .value.neg { color: var(--bad); }
+  .stat .hint { font-size: 11px; color: var(--text-muted); }
+
+  .legend { display: flex; gap: 18px; margin: 0 0 10px; font-size: 12px; color: var(--text-secondary); }
+  .legend span { display: inline-flex; align-items: center; gap: 6px; }
+  .swatch { width: 10px; height: 10px; border-radius: 2px; display: inline-block; }
+
+  .chart-scroll { overflow-x: auto; }
+  svg { display: block; max-width: 100%; }
+  .axis text { fill: var(--text-muted); font-size: 11px; }
+  .axis line { stroke: var(--grid); }
+  .tick-label { fill: var(--text-muted); font-size: 11px; }
+
+  .tbl-scroll { overflow-x: auto; }
+  table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; }
+  th, td { padding: 8px 10px; text-align: right; border-bottom: 1px solid var(--border); white-space: nowrap; }
+  th:first-child, td:first-child { text-align: left; }
+  th {
+    font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em;
+    color: var(--text-muted); font-weight: 600; cursor: pointer; user-select: none;
+  }
+  th:hover { color: var(--text-primary); }
+  tbody tr:hover { background: var(--surface-0); }
+  tbody tr.sel { background: var(--surface-0); }
+  td.ref { font-weight: 600; cursor: pointer; }
+  td.ref:hover { color: var(--series-1); }
+  .muted { color: var(--text-muted); }
+
+  #tip {
+    position: fixed; pointer-events: none; opacity: 0; transition: opacity .1s;
+    background: var(--surface-1); border: 1px solid var(--border); border-radius: 6px;
+    padding: 8px 10px; font-size: 12px; box-shadow: 0 4px 14px rgba(0,0,0,.14);
+    z-index: 10; min-width: 150px;
+  }
+  #tip .tp { color: var(--text-muted); margin-bottom: 4px; }
+  #tip .row { display: flex; justify-content: space-between; gap: 14px; }
+  #tip .row b { font-variant-numeric: tabular-nums; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>watchlab</h1>
+    <p class="sub">Quality-adjusted price indices and supply-side metrics for wristwatch references.</p>
+  </header>
+
+  <p class="caveat">
+    <strong>What these numbers are.</strong> Everything here is derived from <em>asking</em>
+    prices, not transactions. A listing disappearing is not a sale. The index controls for
+    condition, papers, box, age, country and seller type so it is not fooled by a changing
+    listing mix &mdash; but it still measures what sellers ask, not what buyers pay. Treat it
+    as a screen that tells you where to look, never as a return forecast.
+  </p>
+
+  <section class="card">
+    <h2>Constant-quality index</h2>
+    <p class="note">
+      Hedonic index vs the naive median it corrects. Where the two diverge, the gap is
+      composition drift &mdash; a changing mix of listings masquerading as price movement.
+    </p>
+    <div class="controls">
+      <label for="ref">Reference</label>
+      <select id="ref"></select>
+    </div>
+    <div class="stats" id="stats"></div>
+    <div class="legend">
+      <span><i class="swatch" style="background:var(--series-1)"></i> Hedonic (quality-adjusted)</span>
+      <span><i class="swatch" style="background:var(--series-2)"></i> Naive median ask</span>
+    </div>
+    <div class="chart-scroll"><svg id="chart" width="1100" height="330" role="img"
+      aria-label="Quality-adjusted price index over time"></svg></div>
+  </section>
+
+  <section class="card">
+    <h2>Supply-side screen</h2>
+    <p class="note">
+      Ranked by a composite of days-on-market, price-cut rate, ask dispersion and churn.
+      This is a screen, not a forecast. Click a reference to chart it.
+    </p>
+    <div class="tbl-scroll">
+      <table id="screen">
+        <thead><tr>
+          <th data-k="reference">Reference</th>
+          <th data-k="brand">Brand</th>
+          <th data-k="score">Score</th>
+          <th data-k="n_live">Live</th>
+          <th data-k="median_ask_eur">Median ask</th>
+          <th data-k="median_days_on_market">Days on mkt</th>
+          <th data-k="cut_rate">Cut rate</th>
+          <th data-k="median_cut_depth">Cut depth</th>
+          <th data-k="dispersion">Dispersion</th>
+          <th data-k="churn_ratio">New/gone</th>
+          <th data-k="hurdle_1y">Cost hurdle</th>
+        </tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </section>
+</div>
+
+<div id="tip" role="tooltip"></div>
+
+<script>
+const tip = document.getElementById('tip');
+const fmtPct = v => v == null ? '—' : (v * 100).toFixed(1) + '%';
+const fmtEur = v => v == null ? '—' : '€' + Math.round(v).toLocaleString('en-GB');
+const fmtNum = (v, d = 1) => v == null ? '—' : v.toFixed(d);
+
+let screenRows = [];
+let sortKey = 'score', sortDir = -1;
+let current = null;
+
+async function boot() {
+  const refs = await (await fetch('/api/references')).json();
+  const sel = document.getElementById('ref');
+  sel.innerHTML = refs.references.map(r => `<option>${r}</option>`).join('');
+  sel.onchange = () => loadIndex(sel.value);
+
+  const screen = await (await fetch('/api/screen')).json();
+  screenRows = screen.rows;
+  renderTable();
+
+  if (refs.references.length) loadIndex(refs.references[0]);
+}
+
+async function loadIndex(reference) {
+  document.getElementById('ref').value = reference;
+  document.querySelectorAll('#screen tbody tr').forEach(tr =>
+    tr.classList.toggle('sel', tr.dataset.ref === reference));
+  const data = await (await fetch('/api/index?reference=' + encodeURIComponent(reference))).json();
+  current = data;
+  renderStats(data);
+  renderChart(data);
+}
+
+function renderStats(d) {
+  const el = document.getElementById('stats');
+  if (d.error || !d.points.length) { el.innerHTML = `<div class="stat muted">${d.error || 'no data'}</div>`; return; }
+  const net = d.net_cagr;
+  const stat = (label, value, cls, hint) =>
+    `<div class="stat"><div class="label">${label}</div>
+     <div class="value ${cls || ''}">${value}</div>
+     <div class="hint">${hint || ''}</div></div>`;
+  el.innerHTML = [
+    stat('Gross CAGR', fmtPct(d.cagr), d.cagr > 0 ? 'pos' : 'neg', 'quality-adjusted ask'),
+    stat('Cost hurdle', fmtPct(d.hurdle_1y), '', 'break-even over 1 year'),
+    stat('Net of costs', fmtPct(net), net > 0 ? 'pos' : 'neg', 'after round-trip friction'),
+    stat('Papers premium', d.papers_premium == null ? '—' : fmtPct(Math.exp(d.papers_premium) - 1),
+         '', 'estimated from the model'),
+    stat('Fit', 'R² ' + fmtNum(d.r_squared, 2), '', d.n_obs + ' fresh listings')
+  ].join('');
+}
+
+function renderChart(d) {
+  const svg = document.getElementById('chart');
+  svg.innerHTML = '';
+  if (d.error || d.points.length < 2) return;
+
+  const W = 1100, H = 330, L = 52, R = 92, T = 18, B = 40;
+  const pts = d.points;
+  const iw = W - L - R, ih = H - T - B;
+
+  const vals = [];
+  pts.forEach(p => {
+    [p.hedonic, p.naive, p.ci_low, p.ci_high].forEach(v => { if (v != null) vals.push(v); });
+  });
+  let lo = Math.min(...vals), hi = Math.max(...vals);
+  const pad = (hi - lo) * 0.12 || 5;
+  lo -= pad; hi += pad;
+
+  const x = i => L + (pts.length === 1 ? iw / 2 : (i / (pts.length - 1)) * iw);
+  const y = v => T + ih - ((v - lo) / (hi - lo)) * ih;
+  const ns = 'http://www.w3.org/2000/svg';
+  const add = (tag, attrs, parent) => {
+    const el = document.createElementNS(ns, tag);
+    for (const k in attrs) el.setAttribute(k, attrs[k]);
+    (parent || svg).appendChild(el);
+    return el;
+  };
+
+  // Recessive gridlines with a labelled y-axis; 100 is the base period.
+  const ticks = 5;
+  for (let i = 0; i <= ticks; i++) {
+    const v = lo + (hi - lo) * (i / ticks);
+    add('line', { x1: L, x2: L + iw, y1: y(v), y2: y(v), stroke: 'var(--grid)', 'stroke-width': 1 });
+    add('text', { x: L - 10, y: y(v) + 4, class: 'tick-label', 'text-anchor': 'end' }).textContent = v.toFixed(0);
+  }
+  if (lo < 100 && hi > 100) {
+    add('line', { x1: L, x2: L + iw, y1: y(100), y2: y(100),
+                  stroke: 'var(--text-muted)', 'stroke-width': 1, 'stroke-dasharray': '3 3' });
+  }
+
+  const every = Math.max(1, Math.ceil(pts.length / 12));
+  pts.forEach((p, i) => {
+    if (i % every && i !== pts.length - 1) return;
+    add('text', { x: x(i), y: H - 14, class: 'tick-label', 'text-anchor': 'middle' }).textContent = p.period;
+  });
+
+  // Confidence band first, so the lines sit above it.
+  const band = pts.filter(p => p.ci_low != null && p.ci_high != null);
+  if (band.length === pts.length) {
+    const up = pts.map((p, i) => `${x(i)},${y(p.ci_high)}`).join(' ');
+    const down = pts.map((p, i) => `${x(i)},${y(p.ci_low)}`).reverse().join(' ');
+    add('polygon', { points: up + ' ' + down, fill: 'var(--series-1)', opacity: 0.11 });
+  }
+
+  const line = (key, colour, dash) => {
+    const valid = pts.map((p, i) => [i, p[key]]).filter(([, v]) => v != null);
+    if (valid.length < 2) return null;
+    const path = valid.map(([i, v], k) => `${k ? 'L' : 'M'}${x(i)},${y(v)}`).join(' ');
+    add('path', { d: path, fill: 'none', stroke: colour, 'stroke-width': 2,
+                  'stroke-linejoin': 'round', 'stroke-linecap': 'round',
+                  ...(dash ? { 'stroke-dasharray': dash } : {}) });
+    return valid[valid.length - 1];
+  };
+
+  const lastN = line('naive', 'var(--series-2)', '5 4');
+  const lastH = line('hedonic', 'var(--series-1)');
+
+  // Direct labels at the line ends: identity never rests on colour alone.
+  const endLabel = (last, colour, text) => {
+    if (!last) return;
+    add('text', { x: x(last[0]) + 8, y: y(last[1]) + 4, fill: colour,
+                  'font-size': 12, 'font-weight': 600 }).textContent = text;
+  };
+  endLabel(lastH, 'var(--series-1)', 'hedonic');
+  endLabel(lastN, 'var(--series-2)', 'naive');
+
+  // Crosshair + tooltip layer.
+  const rule = add('line', { x1: 0, x2: 0, y1: T, y2: T + ih, stroke: 'var(--text-muted)',
+                             'stroke-width': 1, opacity: 0 });
+  const dotH = add('circle', { r: 4.5, fill: 'var(--series-1)', stroke: 'var(--surface-1)',
+                               'stroke-width': 2, opacity: 0 });
+  const dotN = add('circle', { r: 4.5, fill: 'var(--series-2)', stroke: 'var(--surface-1)',
+                               'stroke-width': 2, opacity: 0 });
+  const hit = add('rect', { x: L, y: T, width: iw, height: ih, fill: 'transparent' });
+
+  hit.addEventListener('mousemove', ev => {
+    const box = svg.getBoundingClientRect();
+    const scale = box.width / W;
+    const px = (ev.clientX - box.left) / scale;
+    let i = Math.round(((px - L) / iw) * (pts.length - 1));
+    i = Math.max(0, Math.min(pts.length - 1, i));
+    const p = pts[i];
+    rule.setAttribute('x1', x(i)); rule.setAttribute('x2', x(i)); rule.setAttribute('opacity', 0.45);
+    dotH.setAttribute('cx', x(i)); dotH.setAttribute('cy', y(p.hedonic)); dotH.setAttribute('opacity', 1);
+    if (p.naive != null) {
+      dotN.setAttribute('cx', x(i)); dotN.setAttribute('cy', y(p.naive)); dotN.setAttribute('opacity', 1);
+    } else dotN.setAttribute('opacity', 0);
+
+    tip.innerHTML =
+      `<div class="tp">${p.period} · n=${p.n}</div>` +
+      `<div class="row"><span>Hedonic</span><b>${p.hedonic.toFixed(1)}</b></div>` +
+      (p.naive != null ? `<div class="row"><span>Naive</span><b>${p.naive.toFixed(1)}</b></div>` : '') +
+      (p.ci_low != null ? `<div class="row"><span class="muted">95% CI</span><b class="muted">${p.ci_low.toFixed(1)}–${p.ci_high.toFixed(1)}</b></div>` : '');
+    tip.style.opacity = 1;
+    tip.style.left = Math.min(ev.clientX + 14, window.innerWidth - 190) + 'px';
+    tip.style.top = (ev.clientY - 10) + 'px';
+  });
+  hit.addEventListener('mouseleave', () => {
+    tip.style.opacity = 0;
+    [rule, dotH, dotN].forEach(el => el.setAttribute('opacity', 0));
+  });
+}
+
+function renderTable() {
+  const rows = [...screenRows].sort((a, b) => {
+    const x = a[sortKey], y = b[sortKey];
+    if (x == null) return 1;
+    if (y == null) return -1;
+    return x > y ? sortDir : x < y ? -sortDir : 0;
+  });
+  const body = document.querySelector('#screen tbody');
+  body.innerHTML = rows.map(r => `
+    <tr data-ref="${r.reference}">
+      <td class="ref">${r.reference}</td>
+      <td class="muted">${r.brand || '—'}</td>
+      <td>${fmtNum(r.score, 3)}</td>
+      <td>${r.n_live}</td>
+      <td>${fmtEur(r.median_ask_eur)}</td>
+      <td>${fmtNum(r.median_days_on_market, 0)}</td>
+      <td>${fmtPct(r.cut_rate)}</td>
+      <td>${fmtPct(r.median_cut_depth)}</td>
+      <td>${fmtNum(r.dispersion, 2)}</td>
+      <td>${fmtNum(r.churn_ratio, 2)}</td>
+      <td>${fmtPct(r.hurdle_1y)}</td>
+    </tr>`).join('');
+  body.querySelectorAll('td.ref').forEach(td =>
+    td.onclick = () => loadIndex(td.parentElement.dataset.ref));
+  if (current) {
+    body.querySelectorAll('tr').forEach(tr =>
+      tr.classList.toggle('sel', tr.dataset.ref === current.reference));
+  }
+}
+
+document.querySelectorAll('#screen th').forEach(th => {
+  th.onclick = () => {
+    const k = th.dataset.k;
+    if (sortKey === k) sortDir *= -1; else { sortKey = k; sortDir = -1; }
+    renderTable();
+  };
+});
+
+boot();
+</script>
+</body>
+</html>
