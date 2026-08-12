@@ -1,0 +1,5 @@
+__pycache__/
+*.pyc
+watchlab.sqlite3
+watchlab.sqlite3-*
+.cache/
